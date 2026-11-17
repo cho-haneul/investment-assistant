@@ -11,12 +11,27 @@ document.addEventListener("DOMContentLoaded", () => {
         el.classList.add("hidden");
     }
 
-    function appendChatMessage(boxEl, role, text) {
+    function renderMarkdown(el, text) {
+        const raw = text || "";
+        if (window.marked && window.DOMPurify) {
+            window.marked.setOptions({ breaks: true, gfm: true });
+            el.classList.add("markdown-body");
+            el.innerHTML = window.DOMPurify.sanitize(window.marked.parse(raw));
+        } else {
+            el.textContent = raw;
+        }
+    }
+
+    function appendChatMessage(boxEl, role, text, isMarkdown = false) {
         const msgDiv = document.createElement("div");
         msgDiv.className = `chat-msg ${role}`;
         const bubble = document.createElement("div");
         bubble.className = "chat-bubble";
-        bubble.textContent = text;
+        if (isMarkdown && role === "bot") {
+            renderMarkdown(bubble, text);
+        } else {
+            bubble.textContent = text;
+        }
         msgDiv.appendChild(bubble);
         boxEl.appendChild(msgDiv);
         boxEl.scrollTop = boxEl.scrollHeight;
@@ -45,9 +60,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ==================== 탭 1: 종목 심층분석 채팅 ====================
     let t1ConversationId = null;
+    let t1CachedStockData = null;
+
+    const t1FetchForm = document.getElementById("t1-fetch-form");
+    const t1FetchBtn = document.getElementById("t1-fetch-btn");
     const t1CodeInput = document.getElementById("t1-code-input");
     const t1UseTools = document.getElementById("t1-use-tools");
+    const t1Status = document.getElementById("t1-status");
     const t1Error = document.getElementById("t1-error");
+    const t1StockView = document.getElementById("t1-stock-view");
+    const t1StockNameEl = document.getElementById("t1-stock-name");
+    const t1StockMetaEl = document.getElementById("t1-stock-meta");
+    const t1CurrentPriceEl = document.getElementById("t1-current-price");
+    const t1PriceChangeEl = document.getElementById("t1-price-change");
+    const t1SnapshotGridEl = document.getElementById("t1-snapshot-grid");
+    const t1FinancialsTbodyEl = document.getElementById("t1-financials-tbody");
+    const t1NewsListEl = document.getElementById("t1-news-list");
+
     const t1ChatBox = document.getElementById("t1-chat-box");
     const t1ChatForm = document.getElementById("t1-chat-form");
     const t1QueryInput = document.getElementById("t1-query-input");
@@ -60,17 +89,205 @@ document.addEventListener("DOMContentLoaded", () => {
         btn.addEventListener("click", () => {
             t1CodeInput.value = btn.dataset.code;
             console.log(`[TAB1] 예시 종목 선택: ${btn.dataset.code}`);
+            runTab1FetchAndAnalyze(btn.dataset.code);
         });
+    });
+
+    t1FetchForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        runTab1FetchAndAnalyze(t1CodeInput.value.trim());
     });
 
     t1ResetBtn.addEventListener("click", () => {
         t1ConversationId = null;
         t1ChatBox.innerHTML = "";
-        appendChatMessage(t1ChatBox, "bot", "대화가 초기화되었습니다. 종목코드와 질문을 입력해 주세요.");
+        appendChatMessage(t1ChatBox, "bot", "대화가 초기화되었습니다. 상단에서 종목을 조회하거나 질문을 입력해 주세요.", true);
         hideEl(t1Error);
-        hideEl(t1EvidenceWrap);
         console.log("[TAB1] 대화 초기화 완료");
     });
+
+    function renderTab1StockDashboard(data) {
+        const snap = data.snapshot || {};
+        t1StockNameEl.textContent = `${data.name} (${data.code})`;
+        t1StockMetaEl.textContent = `${snap.market || "-"} · 장 상태: ${snap.market_status || "-"}`;
+        t1CurrentPriceEl.textContent = formatNum(snap.current_price, "원");
+
+        const cp = snap.change_price;
+        const cr = snap.change_rate;
+        t1PriceChangeEl.className = "price-change";
+        if (cp > 0) {
+            t1PriceChangeEl.classList.add("up");
+            t1PriceChangeEl.textContent = `▲ ${formatNum(cp, "원")} (+${cr ?? 0}%)`;
+        } else if (cp < 0) {
+            t1PriceChangeEl.classList.add("down");
+            t1PriceChangeEl.textContent = `▼ ${formatNum(Math.abs(cp), "원")} (${cr ?? 0}%)`;
+        } else {
+            t1PriceChangeEl.classList.add("flat");
+            t1PriceChangeEl.textContent = "0원 (0.00%)";
+        }
+
+        const metrics = [
+            { label: "시가총액", value: snap.market_cap || "-" },
+            { label: "PER", value: formatNum(snap.per, "배") },
+            { label: "PBR", value: formatNum(snap.pbr, "배") },
+            { label: "52주 최고", value: formatNum(snap.high_52w, "원") },
+            { label: "52주 최저", value: formatNum(snap.low_52w, "원") },
+            { label: "배당수익률", value: formatNum(snap.dividend_yield, "%") },
+            { label: "외국인 소진율", value: formatNum(snap.foreign_rate, "%") },
+        ];
+        t1SnapshotGridEl.innerHTML = "";
+        metrics.forEach((m) => {
+            const card = document.createElement("div");
+            card.className = "metric-card";
+            card.innerHTML = `<div class="metric-label"></div><div class="metric-value"></div>`;
+            card.querySelector(".metric-label").textContent = m.label;
+            card.querySelector(".metric-value").textContent = m.value;
+            t1SnapshotGridEl.appendChild(card);
+        });
+
+        t1FinancialsTbodyEl.innerHTML = "";
+        const financials = data.financials || [];
+        if (financials.length === 0) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="7" style="text-align:center;">수집된 재무실적 데이터가 없습니다.</td>`;
+            t1FinancialsTbodyEl.appendChild(tr);
+        } else {
+            financials.forEach((row) => {
+                const tr = document.createElement("tr");
+                if (row.is_consensus) tr.classList.add("row-consensus");
+
+                const periodTd = document.createElement("td");
+                periodTd.textContent = `${row.period || "-"} `;
+                if (row.is_consensus) {
+                    const badge = document.createElement("span");
+                    badge.className = "badge-consensus";
+                    badge.textContent = "추정(E)";
+                    periodTd.appendChild(badge);
+                }
+                tr.appendChild(periodTd);
+
+                [
+                    formatNum(row.revenue),
+                    formatNum(row.operating_profit),
+                    formatNum(row.net_income),
+                    formatNum(row.operating_margin, "%"),
+                    formatNum(row.roe, "%"),
+                    formatNum(row.debt_ratio, "%"),
+                ].forEach((val) => {
+                    const td = document.createElement("td");
+                    td.textContent = val;
+                    tr.appendChild(td);
+                });
+                t1FinancialsTbodyEl.appendChild(tr);
+            });
+        }
+
+        t1NewsListEl.innerHTML = "";
+        const news = data.news || [];
+        if (news.length === 0) {
+            const li = document.createElement("li");
+            li.className = "news-item";
+            li.textContent = "수집된 최신 뉴스가 없습니다.";
+            t1NewsListEl.appendChild(li);
+        } else {
+            news.forEach((item) => {
+                const li = document.createElement("li");
+                li.className = "news-item";
+
+                const link = document.createElement("a");
+                link.className = "news-title";
+                link.href = item.link || "#";
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                link.textContent = item.title || "(제목 없음)";
+
+                const meta = document.createElement("div");
+                meta.className = "news-meta";
+                meta.textContent = `${item.source || "출처 미상"} · ${item.date || ""}`;
+
+                li.appendChild(link);
+                li.appendChild(meta);
+                if (item.snippet) {
+                    const sn = document.createElement("p");
+                    sn.className = "news-snippet";
+                    sn.textContent = item.snippet;
+                    li.appendChild(sn);
+                }
+                t1NewsListEl.appendChild(li);
+            });
+        }
+    }
+
+    async function runTab1FetchAndAnalyze(code) {
+        if (!/^\d{6}$/.test(code)) {
+            showEl(t1Error, "종목코드는 6자리 숫자로 입력해 주세요. (예: 000660)");
+            return;
+        }
+
+        hideEl(t1Error);
+        showEl(t1Status, `1단계: 종목코드 ${code}의 시세·재무·뉴스 데이터를 수집하는 중입니다...`);
+        t1FetchBtn.disabled = true;
+        t1SendBtn.disabled = true;
+
+        try {
+            console.log(`[TAB1] POST /fetch 시작 (code=${code})`);
+            const fetchResp = await fetch("/fetch", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            const stockData = await fetchResp.json();
+            if (!fetchResp.ok || !stockData.name) {
+                hideEl(t1Status);
+                showEl(t1Error, (stockData.errors && stockData.errors.join(" / ")) || "종목 데이터 수집에 실패했습니다.");
+                return;
+            }
+
+            t1CachedStockData = stockData;
+            t1ConversationId = null;
+            renderTab1StockDashboard(stockData);
+            showEl(t1StockView);
+
+            t1EvidenceJson.textContent = JSON.stringify(stockData, null, 2);
+            showEl(t1EvidenceWrap);
+
+            // 2단계: 전문가 프롬프트로 1차 종합 분석 요청
+            showEl(t1Status, `2단계: ${stockData.name}(${stockData.code}) 수집 데이터를 바탕으로 AI 애널리스트 1차 분석을 생성 중입니다...`);
+            t1ChatBox.innerHTML = "";
+            appendChatMessage(t1ChatBox, "user", `[${stockData.name} (${stockData.code})] 수집된 최신 데이터 기반 종합 분석 요청`);
+            const loadingBubble = appendChatMessage(t1ChatBox, "bot", "전문가 리포트를 작성 중입니다...");
+
+            const chatResp = await fetch("/api/chat/analysis", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    code: stockData.code,
+                    mode: "init",
+                    use_tools: t1UseTools.checked,
+                    stock_data: stockData,
+                }),
+            });
+            const chatData = await chatResp.json();
+            hideEl(t1Status);
+
+            if (!chatResp.ok || chatData.error) {
+                loadingBubble.textContent = `오류: ${chatData.error || "분석 리포트를 생성하지 못했습니다."}`;
+                showEl(t1Error, chatData.error || "Dify 분석 호출 실패");
+                return;
+            }
+
+            t1ConversationId = chatData.conversation_id || null;
+            renderMarkdown(loadingBubble, chatData.answer || "(빈 응답)");
+            console.log("[TAB1] 1차 전문가 분석 완료, conversation_id:", t1ConversationId);
+        } catch (err) {
+            console.error("[TAB1] 조회/분석 오류:", err);
+            hideEl(t1Status);
+            showEl(t1Error, `서버 통신 오류: ${err.message}`);
+        } finally {
+            t1FetchBtn.disabled = false;
+            t1SendBtn.disabled = false;
+        }
+    }
 
     t1ChatForm.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -79,38 +296,43 @@ document.addEventListener("DOMContentLoaded", () => {
         const useTools = t1UseTools.checked;
 
         if (!query) return;
-        if (useTools && !/^\d{6}$/.test(code)) {
+        if (useTools && !t1CachedStockData && !/^\d{6}$/.test(code)) {
             showEl(t1Error, "도구 사용 시 종목코드는 6자리 숫자로 입력해 주세요.");
             return;
         }
 
         hideEl(t1Error);
-        appendChatMessage(t1ChatBox, "user", useTools ? `[${code}] ${query}` : `[도구 없음] ${query}`);
+        appendChatMessage(t1ChatBox, "user", useTools ? query : `[도구 없음] ${query}`);
         t1QueryInput.value = "";
         t1SendBtn.disabled = true;
 
         const loadingBubble = appendChatMessage(
             t1ChatBox,
             "bot",
-            useTools ? "네이버 금융 + Serper 뉴스 수집 후 Dify가 분석 중입니다..." : "Dify에게 직접 질문 중입니다..."
+            useTools ? "수집된 종목 근거를 바탕으로 답변을 작성 중입니다..." : "Dify에게 직접 질문 중입니다..."
         );
 
         try {
-            console.log(`[TAB1] POST /api/chat/analysis (code=${code}, use_tools=${useTools})`);
+            console.log(`[TAB1] POST /api/chat/analysis 후속 질문 (code=${code}, use_tools=${useTools})`);
             const resp = await fetch("/api/chat/analysis", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     code,
                     query,
+                    mode: "chat",
                     use_tools: useTools,
                     conversation_id: t1ConversationId,
+                    stock_data: useTools ? t1CachedStockData : null,
                 }),
             });
             const data = await resp.json();
             console.log("[TAB1] 응답 수신:", resp.status, data);
 
-            if (data.stock_data) {
+            if (data.stock_data && !t1CachedStockData) {
+                t1CachedStockData = data.stock_data;
+                renderTab1StockDashboard(data.stock_data);
+                showEl(t1StockView);
                 t1EvidenceJson.textContent = JSON.stringify(data.stock_data, null, 2);
                 showEl(t1EvidenceWrap);
             }
@@ -122,7 +344,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             t1ConversationId = data.conversation_id || t1ConversationId;
-            loadingBubble.textContent = data.answer || "(빈 응답)";
+            renderMarkdown(loadingBubble, data.answer || "(빈 응답)");
         } catch (err) {
             console.error("[TAB1] 통신 오류:", err);
             loadingBubble.textContent = `서버 통신 오류: ${err.message}`;
@@ -520,7 +742,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             t3ConversationId = data.conversation_id || t3ConversationId;
-            loadingBubble.textContent = data.answer || "(빈 응답)";
+            renderMarkdown(loadingBubble, data.answer || "(빈 응답)");
         } catch (err) {
             console.error("[TAB3] 통신 오류:", err);
             loadingBubble.textContent = `서버 통신 오류: ${err.message}`;

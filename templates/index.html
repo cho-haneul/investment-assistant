@@ -6,6 +6,8 @@
     <title>나의 투자도우미 (My Investment Assistant)</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -37,39 +39,94 @@
                     <h2>종목 심층분석 채팅 <span class="badge-dify">Dify: 투자종목분석기</span></h2>
                     <button type="button" id="t1-reset-btn" class="secondary-btn">대화 초기화</button>
                 </div>
+                <p class="panel-desc">종목코드를 입력하고 <strong>종목 조회 &amp; AI 분석</strong>을 누르면 시세·재무·뉴스를 수집해 표로 보여주고, 전문가 프롬프트로 1차 분석을 실행한 뒤 채팅을 이어갑니다.</p>
 
-                <div class="control-row">
-                    <div class="input-group">
-                        <label for="t1-code-input">종목코드 (6자리)</label>
-                        <input type="text" id="t1-code-input" maxlength="6" placeholder="예: 000660" value="000660">
-                    </div>
-                    <div class="sample-codes inline-samples">
-                        <button type="button" class="sample-btn t1-sample" data-code="000660">SK하이닉스</button>
-                        <button type="button" class="sample-btn t1-sample" data-code="005930">삼성전자</button>
-                        <button type="button" class="sample-btn t1-sample" data-code="035420">NAVER</button>
-                    </div>
+                <form id="t1-fetch-form" class="search-form">
+                    <input type="text" id="t1-code-input" maxlength="6" placeholder="종목코드 6자리 입력 (예: 000660)" value="000660" required>
+                    <button type="submit" id="t1-fetch-btn">종목 조회 &amp; AI 분석</button>
+                </form>
+
+                <div class="sample-codes">
+                    <span>예시 종목:</span>
+                    <button type="button" class="sample-btn t1-sample" data-code="000660">SK하이닉스 (000660)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="005930">삼성전자 (005930)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="035420">NAVER (035420)</button>
                 </div>
 
-                <label class="toggle-label">
+                <label class="toggle-label" style="margin-top: 12px; margin-bottom: 0;">
                     <input type="checkbox" id="t1-use-tools" checked>
                     <span>네이버 금융 + Serper 뉴스 도구 사용 (체크 해제 시 도구 없이 AI에게 직접 질문 비교)</span>
                 </label>
 
-                <div id="t1-error" class="error-box hidden"></div>
+                <div id="t1-status" class="status-box hidden" style="margin-top: 14px; margin-bottom: 0;"></div>
+                <div id="t1-error" class="error-box hidden" style="margin-top: 14px; margin-bottom: 0;"></div>
+            </div>
 
-                <div id="t1-chat-box" class="chat-box">
+            <!-- 수집된 종목 데이터 대시보드 (/test 이상의 가독성) -->
+            <div id="t1-stock-view" class="hidden">
+                <div class="card">
+                    <div class="stock-header">
+                        <div>
+                            <h2 id="t1-stock-name">-</h2>
+                            <span id="t1-stock-meta" class="stock-meta">-</span>
+                        </div>
+                        <div class="price-box">
+                            <div id="t1-current-price" class="current-price">-</div>
+                            <div id="t1-price-change" class="price-change">-</div>
+                        </div>
+                    </div>
+                    <div id="t1-snapshot-grid" class="snapshot-grid"></div>
+                </div>
+
+                <div class="card">
+                    <div class="section-title-row">
+                        <h3>연간 재무실적</h3>
+                        <span class="unit-note">단위: 억원 / % &nbsp;|&nbsp; <span class="badge-consensus">추정(E)</span> 컨센서스 구분</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="finance-table">
+                            <thead>
+                                <tr>
+                                    <th>기간</th>
+                                    <th>매출액</th>
+                                    <th>영업이익</th>
+                                    <th>당기순이익</th>
+                                    <th>영업이익률</th>
+                                    <th>ROE</th>
+                                    <th>부채비율</th>
+                                </tr>
+                            </thead>
+                            <tbody id="t1-financials-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>최신 관련 뉴스</h3>
+                    <ul id="t1-news-list" class="news-list"></ul>
+                </div>
+            </div>
+
+            <!-- Dify 전문가 분석 & 후속 채팅 -->
+            <div class="card">
+                <div class="section-title-row">
+                    <h3>AI 애널리스트 심층분석 채팅</h3>
+                    <span class="unit-note">수집된 근거 기반으로 후속 질문을 이어갈 수 있습니다</span>
+                </div>
+
+                <div id="t1-chat-box" class="chat-box chat-box-tall">
                     <div class="chat-msg bot">
-                        <div class="chat-bubble">종목코드를 입력하고 궁금한 점을 물어보세요. (예: "현재 PER, 실적 추이, 최신 뉴스를 근거로 분석해줘")</div>
+                        <div class="chat-bubble markdown-body">상단에서 <strong>종목 조회 &amp; AI 분석</strong>을 누르시면 데이터를 수집해 1차 전문가 리포트를 작성해 드립니다.</div>
                     </div>
                 </div>
 
                 <form id="t1-chat-form" class="chat-form">
-                    <input type="text" id="t1-query-input" placeholder="질문을 입력하세요..." autocomplete="off" required>
+                    <input type="text" id="t1-query-input" placeholder="후속 질문을 입력하세요 (예: 경쟁사 대비 밸류에이션은 어떤가요?)..." autocomplete="off" required>
                     <button type="submit" id="t1-send-btn">전송</button>
                 </form>
 
                 <details id="t1-evidence-wrap" class="evidence-wrap hidden">
-                    <summary>백엔드가 수집해 Dify에 전달한 근거 JSON 보기</summary>
+                    <summary>백엔드가 수집해 Dify에 전달한 원시 근거 JSON 보기</summary>
                     <pre id="t1-evidence-json" class="evidence-pre"></pre>
                 </details>
             </div>
