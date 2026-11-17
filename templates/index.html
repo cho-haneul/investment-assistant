@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Data Collector &amp; Briefing Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="page-header">
+            <h1>Stock Data Collector &amp; Briefing Tool</h1>
+            <p class="subtitle">6자리 종목코드를 입력하면 실시간 시세, 투자지표, 연간 실적, 최신 뉴스를 한눈에 모아봅니다.</p>
+        </header>
+
+        <!-- 검색창 구역 -->
+        <section class="card search-section">
+            <form id="search-form" class="search-form">
+                <label for="code-input" class="sr-only">종목코드 6자리</label>
+                <input
+                    type="text"
+                    id="code-input"
+                    name="code"
+                    maxlength="6"
+                    placeholder="종목코드 6자리 입력 (예: 000660)"
+                    autocomplete="off"
+                    required
+                >
+                <button type="submit" id="search-btn">데이터 수집</button>
+            </form>
+            <div class="sample-codes">
+                <span>예시 종목:</span>
+                <button type="button" class="sample-btn" data-code="000660">SK하이닉스 (000660)</button>
+                <button type="button" class="sample-btn" data-code="005930">삼성전자 (005930)</button>
+                <button type="button" class="sample-btn" data-code="035420">NAVER (035420)</button>
+            </div>
+        </section>
+
+        <!-- 상태 / 오류 알림 구역 -->
+        <div id="status-box" class="status-box hidden"></div>
+        <div id="error-box" class="error-box hidden"></div>
+
+        <!-- 수집 결과 구역 -->
+        <main id="result-section" class="hidden">
+            <!-- 1. 스냅샷 카드 구역 -->
+            <section class="card">
+                <div class="stock-header">
+                    <div>
+                        <h2 id="stock-name">-</h2>
+                        <span id="stock-meta" class="stock-meta">-</span>
+                    </div>
+                    <div class="price-box">
+                        <div id="current-price" class="current-price">-</div>
+                        <div id="price-change" class="price-change">-</div>
+                    </div>
+                </div>
+
+                <div id="snapshot-grid" class="snapshot-grid">
+                    <!-- JS로 투자지표 카드 렌더링 -->
+                </div>
+            </section>
+
+            <!-- 2. 기업 실적 표 구역 -->
+            <section class="card">
+                <div class="section-title-row">
+                    <h3>연간 재무실적</h3>
+                    <span class="unit-note">단위: 억원 / % &nbsp;|&nbsp; <span class="badge-consensus">추정(E)</span> 컨센서스 구분</span>
+                </div>
+                <div class="table-wrap">
+                    <table class="finance-table">
+                        <thead>
+                            <tr>
+                                <th>기간</th>
+                                <th>매출액</th>
+                                <th>영업이익</th>
+                                <th>당기순이익</th>
+                                <th>영업이익률</th>
+                                <th>ROE</th>
+                                <th>부채비율</th>
+                            </tr>
+                        </thead>
+                        <tbody id="financials-tbody">
+                            <!-- JS로 실적 행 렌더링 -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 3. 최신 뉴스 리스트 구역 -->
+            <section class="card">
+                <h3>최신 관련 뉴스</h3>
+                <ul id="news-list" class="news-list">
+                    <!-- JS로 뉴스 목록 렌더링 -->
+                </ul>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
