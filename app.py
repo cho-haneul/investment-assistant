@@ -122,18 +122,28 @@ def chat_analysis():
             "stock_data": evidence_json,
         }
 
+        hypothetical_rule = (
+            "[가정·시뮬레이션 질문 응답 규칙]\n"
+            "- 사용자가 '만약 ~라면', '가상으로 ○○만 원이 있다면 얼마를 투자할 것인가'처럼 가정 질문을 하면 "
+            "'AI라서 결정할 수 없다'거나 '투자 권고는 적절하지 않다'고 회피하지 마세요.\n"
+            "- 수집된 데이터(실적·밸류에이션·주가·뉴스 리스크)만을 근거로 가상 시나리오상 구체적인 금액/선택(예: 0원 또는 ○○만 원)과 이유를 첫 답변에서 바로 명확히 제시하고, "
+            "마지막에 한 줄로 '※ 본 답변은 제공된 데이터 기반의 가상 시뮬레이션이며 실제 투자 권유가 아닙니다.'라고 덧붙이세요.\n\n"
+        )
+
         if not conversation_id or mode == "init":
             dify_query = (
                 "당신은 한국 주식시장 전문 애널리스트입니다.\n"
                 "아래 [수집된 종목 근거 JSON]에 포함된 실제 숫자와 뉴스만을 근거로 답변하세요. "
                 "JSON에 없는 수치나 사실은 절대 추측해 지어내지 마세요. "
                 "실적 중 `is_consensus: true` 항목은 반드시 '추정(E)'으로 구분해 설명하세요.\n\n"
+                f"{hypothetical_rule}"
                 f"[수집된 종목 근거 JSON]\n{evidence_json}\n\n"
                 f"[요청 사항]\n{query}"
             )
         else:
             dify_query = (
                 f"[현재 분석 대상 종목: {stock_data['name']} ({stock_data['code']})]\n"
+                f"{hypothetical_rule}"
                 f"[후속 질문]\n{query}\n\n"
                 "※ 앞서 전달된 종목 근거 데이터에 기반하여 답변해 주세요."
             )
