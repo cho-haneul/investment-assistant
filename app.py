@@ -4,6 +4,7 @@ import logging
 from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
 from collector import collect_stock_data, search_stocks
+from dart_client import collect_dart_data
 from dify_client import ask_analysis_bot, ask_tech_bot
 from quant import calculate_rebalancing, calculate_technical_indicators
 
@@ -43,6 +44,9 @@ def health_check():
     dify_tech_configured = bool(
         os.getenv("DIFY_TECH_API_KEY") and os.getenv("DIFY_TECH_API_KEY") != "your_dify_tech_api_key_here"
     )
+    dart_configured = bool(
+        os.getenv("DART_API_KEY") and os.getenv("DART_API_KEY") != "your_dart_api_key_here"
+    )
 
     logger.info("[HEALTH] Server health check performed")
 
@@ -54,6 +58,7 @@ def health_check():
             "gemini_configured": gemini_configured,
             "dify_analysis_configured": dify_analysis_configured,
             "dify_tech_configured": dify_tech_configured,
+            "dart_configured": dart_configured,
         }
     }), 200
 
@@ -318,6 +323,93 @@ def chat_technical():
         "conversation_id": dify_res["conversation_id"],
         "injected_indicators": latest,
     }), 200
+
+
+@app.route("/api/dart", methods=["POST"])
+def api_dart():
+    """탭 4: Open DART 공식 공시, 현금흐름표, 임원·대주주 지분변동 수집"""
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or "").strip()
+    logger.info(f"[DART-API] DART 공시 조회 요청 (code={code})")
+
+    data, err = collect_dart_data(code)
+    if err:
+        return jsonify({"error": err}), 400
+    return jsonify(data), 200
+
+
+@app.route("/api/chat/dart", methods=["POST"])
+def chat_dart():
+    """탭 4: 수집된 DART 공시·현금흐름·지분변동 데이터를 근거로 AI 공시 번역/분석 챗봇 호출"""
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or "").strip()
+    query = str(body.get("query") or "").strip()
+    conversation_id = body.get("conversation_id") or None
+    cached_dart = body.get("dart_data")
+    mode = body.get("mode", "chat")
+
+    if mode == "init" and not query:
+        query = (
+            "수집된 DART 공식 공시·현금흐름표·임원/대주주 지분변동 데이터를 바탕으로 "
+            "주식을 잘 모르는 초보자도 이해하기 쉽게 핵심을 정리해 주세요.\n"
+            "다음 4개 항목으로 구조화해 주세요:\n"
+            "1. **최근 공시 핵심 요약 (호재 vs 주의 공시 번역)**\n"
+            "2. **현금흐름표 건강도 해석** (영업·투자·재무 현금흐름이 의미하는 바)\n"
+            "3. **임원 및 대주주 지분 변동 시그널**\n"
+            "4. **투자자 체크포인트 (한 줄 요약)**"
+        )
+
+    if not query:
+        return jsonify({"error": "질문을 입력해 주세요."}), 400
+
+    dart_data = None
+    if isinstance(cached_dart, dict) and cached_dart.get("name") and (not code or cached_dart.get("code") == code):
+        dart_data = cached_dart
+    else:
+        if not code:
+            return jsonify({"error": "종목코드(6자리)를 먼저 입력해 주세요."}), 400
+        dart_data, err = collect_dart_data(code)
+        if err:
+            return jsonify({"error": err}), 400
+        conversation_id = None
+
+    evidence_json = json.dumps(dart_data, ensure_ascii=False)
+    inputs = {
+        "code": dart_data["code"],
+        "stock_name": dart_data["name"],
+        "stock_data": evidence_json,
+    }
+
+    if not conversation_id or mode == "init":
+        dify_query = (
+            "당신은 금융감독원 DART 전자공시 전문 애널리스트입니다.\n"
+            "아래 [DART 공식 공시·현금흐름·지분 근거 JSON]에 포함된 실제 공시 제목, 금액(단위: 억원), 지분율만을 근거로 설명하세요. "
+            "JSON에 없는 내용은 절대 추측해 지어내지 마세요.\n\n"
+            f"[DART 공식 근거 JSON]\n{evidence_json}\n\n"
+            f"[요청 사항]\n{query}"
+        )
+    else:
+        dify_query = (
+            f"[현재 DART 분석 대상: {dart_data['name']} ({dart_data['code']})]\n"
+            f"[후속 질문]\n{query}\n\n"
+            "※ 앞서 전달된 DART 공식 공시·현금흐름·지분 데이터에 기반하여 초보자 눈높이로 답변해 주세요."
+        )
+
+    logger.info(f"[CHAT-DART] DART 근거 주입 후 Dify 호출 (code={dart_data['code']}, mode={mode})")
+    dify_res, err = ask_analysis_bot(
+        query=dify_query,
+        inputs=inputs,
+        conversation_id=conversation_id,
+    )
+    if err:
+        return jsonify({"error": err, "dart_data": dart_data}), 502
+
+    return jsonify({
+        "answer": dify_res["answer"],
+        "conversation_id": dify_res["conversation_id"],
+        "dart_data": dart_data,
+    }), 200
+
 
 if __name__ == "__main__":
     debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"

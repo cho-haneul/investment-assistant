@@ -19,7 +19,7 @@
             <a href="/test" class="test-link-btn">1차 원데이터 테스트 (/test)</a>
         </header>
 
-        <!-- 3탭 네비게이션 -->
+        <!-- 4탭 네비게이션 -->
         <nav class="tab-nav" role="tablist">
             <button type="button" class="tab-btn active" data-tab="tab-analysis">
                 탭 1. 종목 심층분석 채팅
@@ -29,6 +29,9 @@
             </button>
             <button type="button" class="tab-btn" data-tab="tab-technical">
                 탭 3. 기술지표 차트 + 채팅
+            </button>
+            <button type="button" class="tab-btn" data-tab="tab-dart">
+                탭 4. DART 공시·재무
             </button>
         </nav>
 
@@ -389,6 +392,112 @@
                         <button type="submit" id="t3-send-btn">전송</button>
                     </form>
                 </div>
+            </div>
+        </section>
+
+        <!-- ==================== 탭 4: DART 공시·재무 ==================== -->
+        <section id="tab-dart" class="tab-panel">
+            <div class="card">
+                <div class="section-title-row">
+                    <h2>DART 공식 공시 · 현금흐름 · 지분변동 <span class="badge-dify">Open DART + AI 번역</span></h2>
+                    <button type="button" id="t4-reset-btn" class="secondary-btn">대화 초기화</button>
+                </div>
+                <p class="panel-desc">금융감독원 전자공시(DART)에서 공식 기업 개황, 최근 90일 공시, 현금흐름표, 임원·대주주 지분 변동을 불러와 AI가 초보자 눈높이로 해석해 줍니다. (국내 상장기업 지원)</p>
+
+                <form id="t4-form" class="search-form">
+                    <div class="autocomplete-wrap" style="flex:1; position:relative;">
+                        <input type="text" id="t4-code-input" maxlength="30" value="005930" placeholder="국내 상장사 이름 또는 6자리 코드 (예: 삼성전자, 005930, 000660)" autocomplete="off" required style="width:100%;">
+                        <div id="t4-ac-list" class="autocomplete-list hidden"></div>
+                    </div>
+                    <button type="submit" id="t4-load-btn">DART 공시 &amp; AI 분석</button>
+                </form>
+
+                <div class="sample-codes">
+                    <span>예시 기업:</span>
+                    <button type="button" class="sample-btn t4-sample" data-code="005930">삼성전자 (005930)</button>
+                    <button type="button" class="sample-btn t4-sample" data-code="000660">SK하이닉스 (000660)</button>
+                    <button type="button" class="sample-btn t4-sample" data-code="035420">NAVER (035420)</button>
+                    <button type="button" class="sample-btn t4-sample" data-code="035720">카카오 (035720)</button>
+                </div>
+
+                <div id="t4-status" class="status-box hidden" style="margin-top: 14px; margin-bottom: 0;"></div>
+                <div id="t4-error" class="error-box hidden" style="margin-top: 14px; margin-bottom: 0;"></div>
+            </div>
+
+            <div id="t4-result" class="hidden">
+                <div class="card">
+                    <div class="section-title-row">
+                        <h3 id="t4-company-title">기업 공식 개황</h3>
+                        <a id="t4-homepage-link" href="#" target="_blank" rel="noopener noreferrer" class="unit-note hidden">공식 홈페이지 ↗</a>
+                    </div>
+                    <div id="t4-company-grid" class="snapshot-grid"></div>
+                </div>
+
+                <div id="t4-cf-card" class="card hidden">
+                    <div class="section-title-row">
+                        <h3 id="t4-cf-title">현금흐름표 &amp; 재무상태</h3>
+                        <span id="t4-cf-badge" class="badge-python">-</span>
+                    </div>
+                    <div id="t4-cf-grid" class="snapshot-grid" style="margin-bottom: 14px;"></div>
+                    <div class="chart-box">
+                        <canvas id="t4-cf-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="section-title-row">
+                        <h3>최근 90일 주요 공시 피드</h3>
+                        <span class="unit-note">제목을 클릭하면 DART 원문으로 이동합니다</span>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="finance-table">
+                            <thead>
+                                <tr>
+                                    <th>접수일</th>
+                                    <th>구분</th>
+                                    <th>공시 보고서명</th>
+                                    <th>제출인</th>
+                                </tr>
+                            </thead>
+                            <tbody id="t4-disc-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>임원 · 주요주주 지분 변동 (최근 내역)</h3>
+                    <div class="table-wrap">
+                        <table class="finance-table">
+                            <thead>
+                                <tr>
+                                    <th>접수일</th>
+                                    <th>보고자</th>
+                                    <th>직위/관계</th>
+                                    <th>보유 주식수</th>
+                                    <th>증감</th>
+                                    <th>지분율 (%)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="t4-insider-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="section-title-row">
+                    <h3>DART 공시 번역기 &amp; AI Q&amp;A 채팅</h3>
+                    <span class="unit-note">공시·현금흐름·지분변동 근거로 답변합니다</span>
+                </div>
+                <div id="t4-chat-box" class="chat-box chat-box-tall">
+                    <div class="chat-msg bot">
+                        <div class="chat-bubble markdown-body">상단에서 <strong>DART 공시 &amp; AI 분석</strong>을 누르시면 최근 공시 호재/악재 요약과 현금흐름·지분 해석을 작성해 드립니다.</div>
+                    </div>
+                </div>
+                <form id="t4-chat-form" class="chat-form">
+                    <input type="text" id="t4-query-input" placeholder="공시나 현금흐름에 대해 질문해 보세요 (예: 최근 공시 중 주의할 내용이 있나요?)" autocomplete="off" required>
+                    <button type="submit" id="t4-send-btn">전송</button>
+                </form>
             </div>
         </section>
 

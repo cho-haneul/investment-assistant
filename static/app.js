@@ -1221,4 +1221,306 @@ document.addEventListener("DOMContentLoaded", () => {
             t3SendBtn.disabled = false;
         }
     });
+
+    // ==================== 탭 4: DART 공시·재무 ====================
+    let t4CachedDartData = null;
+    let t4ConversationId = null;
+    let t4CfChart = null;
+
+    const t4Form = document.getElementById("t4-form");
+    const t4CodeInput = document.getElementById("t4-code-input");
+    const t4AcList = document.getElementById("t4-ac-list");
+    const t4LoadBtn = document.getElementById("t4-load-btn");
+    const t4ResetBtn = document.getElementById("t4-reset-btn");
+    const t4Status = document.getElementById("t4-status");
+    const t4Error = document.getElementById("t4-error");
+    const t4Result = document.getElementById("t4-result");
+    const t4CompanyTitle = document.getElementById("t4-company-title");
+    const t4HomepageLink = document.getElementById("t4-homepage-link");
+    const t4CompanyGrid = document.getElementById("t4-company-grid");
+    const t4CfCard = document.getElementById("t4-cf-card");
+    const t4CfTitle = document.getElementById("t4-cf-title");
+    const t4CfBadge = document.getElementById("t4-cf-badge");
+    const t4CfGrid = document.getElementById("t4-cf-grid");
+    const t4DiscTbody = document.getElementById("t4-disc-tbody");
+    const t4InsiderTbody = document.getElementById("t4-insider-tbody");
+    const t4ChatBox = document.getElementById("t4-chat-box");
+    const t4ChatForm = document.getElementById("t4-chat-form");
+    const t4QueryInput = document.getElementById("t4-query-input");
+    const t4SendBtn = document.getElementById("t4-send-btn");
+
+    document.querySelectorAll(".t4-sample").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            t4CodeInput.value = btn.dataset.code;
+            runTab4DartAndAnalyze(btn.dataset.code);
+        });
+    });
+
+    setupAutocomplete(t4CodeInput, t4AcList, (item) => {
+        t4CodeInput.value = item.code;
+        runTab4DartAndAnalyze(item.code);
+    });
+
+    t4Form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const resolved = await resolveCodeOrSearch(t4CodeInput.value);
+        t4CodeInput.value = resolved;
+        runTab4DartAndAnalyze(resolved);
+    });
+
+    t4ResetBtn.addEventListener("click", () => {
+        t4ConversationId = null;
+        t4ChatBox.innerHTML = "";
+        appendChatMessage(t4ChatBox, "bot", "DART 공시 대화가 초기화되었습니다. 상단에서 기업을 조회하거나 질문을 입력해 주세요.", true);
+        hideEl(t4Error);
+    });
+
+    function renderTab4DartDashboard(data) {
+        const comp = data.company || {};
+        t4CompanyTitle.textContent = `${data.name} (${data.code}) · DART 공식 개황`;
+        if (comp.hm_url) {
+            const url = comp.hm_url.startsWith("http") ? comp.hm_url : `https://${comp.hm_url}`;
+            t4HomepageLink.href = url;
+            showEl(t4HomepageLink);
+        } else {
+            hideEl(t4HomepageLink);
+        }
+
+        const estFormatted = comp.est_dt && comp.est_dt.length === 8
+            ? `${comp.est_dt.slice(0, 4)}-${comp.est_dt.slice(4, 6)}-${comp.est_dt.slice(6, 8)}`
+            : (comp.est_dt || "-");
+
+        renderMetricCards(t4CompanyGrid, [
+            { label: "대표이사", value: comp.ceo_name || "-" },
+            { label: "상장 시장", value: comp.market || "-" },
+            { label: "설립일", value: estFormatted },
+            { label: "결산월", value: comp.acc_mt ? `${comp.acc_mt}월` : "-" },
+            { label: "DART 고유번호", value: data.corp_code || "-" },
+        ]);
+
+        // 현금흐름표 & 재무상태
+        const fh = data.financial_health;
+        if (fh && fh.cashflow) {
+            showEl(t4CfCard);
+            const cf = fh.cashflow;
+            const bs = fh.balance || {};
+            t4CfTitle.textContent = `현금흐름표 & 재무상태 (${fh.bsns_year}년 ${fh.fs_type} 기준 · 단위: 억원)`;
+            t4CfBadge.textContent = fh.health_label || "-";
+
+            renderMetricCards(t4CfGrid, [
+                { label: "영업활동 현금흐름", value: formatNum(cf.operating, "억"), hint: "본업으로 실제 들어온 현금 (+일수록 우수)" },
+                { label: "투자활동 현금흐름", value: formatNum(cf.investing, "억"), hint: "설비/미래 투자 (-면 적극 투자 중)" },
+                { label: "재무활동 현금흐름", value: formatNum(cf.financing, "억"), hint: "차입/상환/배당 (+면 자금 조달, -면 빚 상환·배당)" },
+                { label: "자산총계", value: formatNum(bs.assets, "억") },
+                { label: "부채총계", value: formatNum(bs.liabilities, "억") },
+                { label: "자본총계", value: formatNum(bs.equity, "억") },
+            ]);
+
+            if (t4CfChart) t4CfChart.destroy();
+            const cfVals = [cf.operating, cf.investing, cf.financing];
+            t4CfChart = new Chart(document.getElementById("t4-cf-chart"), {
+                type: "bar",
+                data: {
+                    labels: ["영업활동 현금흐름", "투자활동 현금흐름", "재무활동 현금흐름"],
+                    datasets: [{
+                        label: "현금흐름 (억원)",
+                        data: cfVals,
+                        backgroundColor: cfVals.map((v) => (v !== null && v >= 0 ? "rgba(16, 185, 129, 0.75)" : "rgba(239, 68, 68, 0.75)")),
+                    }],
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+            });
+        } else {
+            hideEl(t4CfCard);
+        }
+
+        // 최근 공시 피드
+        t4DiscTbody.innerHTML = "";
+        const discs = data.disclosures || [];
+        if (discs.length === 0) {
+            t4DiscTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">최근 90일 내 공시가 없습니다.</td></tr>`;
+        } else {
+            const tagClassMap = {
+                "호재": "disc-tag-good",
+                "주의": "disc-tag-warn",
+                "실적": "disc-tag-perf",
+                "일반": "disc-tag-etc",
+            };
+            discs.forEach((d) => {
+                const tr = document.createElement("tr");
+                const dtStr = d.rcept_dt && d.rcept_dt.length === 8
+                    ? `${d.rcept_dt.slice(0, 4)}-${d.rcept_dt.slice(4, 6)}-${d.rcept_dt.slice(6, 8)}`
+                    : (d.rcept_dt || "-");
+
+                const dtTd = document.createElement("td");
+                dtTd.textContent = dtStr;
+                tr.appendChild(dtTd);
+
+                const tagTd = document.createElement("td");
+                const tagSpan = document.createElement("span");
+                tagSpan.className = `disc-tag ${tagClassMap[d.tag] || "disc-tag-etc"}`;
+                tagSpan.textContent = d.tag || "일반";
+                tagTd.appendChild(tagSpan);
+                tr.appendChild(tagTd);
+
+                const nmTd = document.createElement("td");
+                const a = document.createElement("a");
+                a.href = d.url || "#";
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.textContent = d.report_nm || "-";
+                a.style.color = "#1d4ed8";
+                a.style.textDecoration = "none";
+                nmTd.appendChild(a);
+                tr.appendChild(nmTd);
+
+                const flrTd = document.createElement("td");
+                flrTd.textContent = d.flr_nm || "-";
+                tr.appendChild(flrTd);
+
+                t4DiscTbody.appendChild(tr);
+            });
+        }
+
+        // 임원·주요주주 지분 변동
+        t4InsiderTbody.innerHTML = "";
+        const insiders = data.insider_trades || [];
+        if (insiders.length === 0) {
+            t4InsiderTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">최근 임원·주요주주 지분 변동 보고 내역이 없습니다.</td></tr>`;
+        } else {
+            insiders.forEach((row) => {
+                const tr = document.createElement("tr");
+                const dtStr = row.rcept_dt && row.rcept_dt.length === 8
+                    ? `${row.rcept_dt.slice(0, 4)}-${row.rcept_dt.slice(4, 6)}-${row.rcept_dt.slice(6, 8)}`
+                    : (row.rcept_dt || "-");
+                [
+                    dtStr,
+                    row.repror || "-",
+                    row.position || "-",
+                    row.shares || "-",
+                    row.shares_diff || "-",
+                    row.rate ? `${row.rate}%` : "-",
+                ].forEach((v) => {
+                    const td = document.createElement("td");
+                    td.textContent = v;
+                    tr.appendChild(td);
+                });
+                t4InsiderTbody.appendChild(tr);
+            });
+        }
+    }
+
+    async function runTab4DartAndAnalyze(rawCode) {
+        const code = String(rawCode || "").trim().toUpperCase();
+        if (!/^\d{6}$/.test(code)) {
+            showEl(t4Error, "DART 공시는 국내 상장 6자리 숫자 종목코드만 지원합니다. (예: 005930)");
+            return;
+        }
+        t4CodeInput.value = code;
+        hideEl(t4Error);
+        showEl(t4Status, `1단계: Open DART에서 ${code}의 공식 공시·현금흐름표·지분변동 데이터를 수집 중입니다...`);
+        t4LoadBtn.disabled = true;
+        t4SendBtn.disabled = true;
+
+        try {
+            const resp = await fetch("/api/dart", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            const dartData = await resp.json();
+            if (!resp.ok || dartData.error) {
+                hideEl(t4Status);
+                showEl(t4Error, dartData.error || "DART 데이터 조회에 실패했습니다.");
+                return;
+            }
+
+            t4CachedDartData = dartData;
+            t4ConversationId = null;
+            renderTab4DartDashboard(dartData);
+            showEl(t4Result);
+
+            showEl(t4Status, `2단계: ${dartData.name}(${dartData.code}) DART 공시를 AI가 초보자 눈높이로 번역·분석 중입니다...`);
+            t4ChatBox.innerHTML = "";
+            appendChatMessage(t4ChatBox, "user", `[${dartData.name} (${dartData.code})] DART 공시 · 현금흐름 · 지분변동 AI 분석 요청`);
+            const loadingBubble = appendChatMessage(t4ChatBox, "bot", "공식 공시와 현금흐름표를 분석 중입니다...");
+
+            const chatResp = await fetch("/api/chat/dart", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    code: dartData.code,
+                    mode: "init",
+                    dart_data: dartData,
+                }),
+            });
+            const chatData = await chatResp.json();
+            hideEl(t4Status);
+
+            if (!chatResp.ok || chatData.error) {
+                loadingBubble.textContent = `오류: ${chatData.error || "AI 공시 분석을 생성하지 못했습니다."}`;
+                showEl(t4Error, chatData.error || "DART AI 분석 실패");
+                return;
+            }
+
+            t4ConversationId = chatData.conversation_id || null;
+            renderMarkdown(loadingBubble, chatData.answer || "(빈 응답)");
+        } catch (err) {
+            hideEl(t4Status);
+            showEl(t4Error, `서버 통신 오류: ${err.message}`);
+        } finally {
+            t4LoadBtn.disabled = false;
+            t4SendBtn.disabled = false;
+        }
+    }
+
+    t4ChatForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const code = t4CodeInput.value.trim().toUpperCase();
+        const query = t4QueryInput.value.trim();
+        if (!query) return;
+
+        if (t4CachedDartData && code && t4CachedDartData.code !== code) {
+            t4CachedDartData = null;
+            t4ConversationId = null;
+        }
+        if (!t4CachedDartData && !/^\d{6}$/.test(code)) {
+            showEl(t4Error, "국내 6자리 종목코드를 먼저 조회해 주세요.");
+            return;
+        }
+
+        hideEl(t4Error);
+        appendChatMessage(t4ChatBox, "user", query);
+        t4QueryInput.value = "";
+        t4SendBtn.disabled = true;
+
+        const loadingBubble = appendChatMessage(t4ChatBox, "bot", "DART 공시 근거를 바탕으로 답변을 작성 중입니다...");
+
+        try {
+            const resp = await fetch("/api/chat/dart", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    code,
+                    query,
+                    mode: "chat",
+                    conversation_id: t4ConversationId,
+                    dart_data: t4CachedDartData,
+                }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.error) {
+                loadingBubble.textContent = `오류: ${data.error || "답변을 받지 못했습니다."}`;
+                showEl(t4Error, data.error || "요청 처리 중 오류가 발생했습니다.");
+                return;
+            }
+            t4ConversationId = data.conversation_id || t4ConversationId;
+            renderMarkdown(loadingBubble, data.answer || "(빈 응답)");
+        } catch (err) {
+            loadingBubble.textContent = `서버 통신 오류: ${err.message}`;
+            showEl(t4Error, `서버 통신 오류: ${err.message}`);
+        } finally {
+            t4SendBtn.disabled = false;
+        }
+    });
 });
