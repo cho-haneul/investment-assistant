@@ -449,9 +449,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== 탭 2: 리밸런싱 도우미 ====================
     let t2WeightsChart = null;
     let t2FrontierChart = null;
+    let t2EquityChart = null;
+    let t2DdChart = null;
 
     const t2Form = document.getElementById("t2-form");
     const t2CodesInput = document.getElementById("t2-codes-input");
+    const t2YearsInput = document.getElementById("t2-years");
+    const t2FreqInput = document.getElementById("t2-freq");
+    const t2CapitalInput = document.getElementById("t2-capital");
     const t2CalcBtn = document.getElementById("t2-calc-btn");
     const t2Status = document.getElementById("t2-status");
     const t2Error = document.getElementById("t2-error");
@@ -470,18 +475,26 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         const rawCodes = t2CodesInput.value.trim();
         if (!rawCodes) return;
+        const years = Number(t2YearsInput ? t2YearsInput.value : 1) || 1;
+        const rebalanceFreq = t2FreqInput ? t2FreqInput.value : "none";
+        const initialCapital = Number(t2CapitalInput ? t2CapitalInput.value : 10000000) || 10000000;
 
         hideEl(t2Error);
         hideEl(t2Result);
-        showEl(t2Status, "FinanceDataReader로 최근 1년 주가를 불러와 몬테카를로 시뮬레이션을 계산 중입니다...");
+        showEl(t2Status, `FinanceDataReader로 최근 ${years}년 주가를 불러와 백테스트 및 몬테카를로 시뮬레이션을 계산 중입니다...`);
         t2CalcBtn.disabled = true;
 
         try {
-            console.log(`[TAB2] POST /api/rebalance (codes=${rawCodes})`);
+            console.log(`[TAB2] POST /api/rebalance (codes=${rawCodes}, years=${years}, freq=${rebalanceFreq})`);
             const resp = await fetch("/api/rebalance", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ codes: rawCodes }),
+                body: JSON.stringify({
+                    codes: rawCodes,
+                    years,
+                    rebalance_freq: rebalanceFreq,
+                    initial_capital: initialCapital,
+                }),
             });
             const data = await resp.json();
             console.log("[TAB2] 응답 수신:", resp.status, data);
@@ -506,13 +519,14 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderRebalanceResult(data) {
         const opt = data.optimal_portfolio || {};
         const eq = data.equal_portfolio || {};
+        const period = data.period || {};
 
         const summaryCards = [
-            { label: "최적 기대수익률 (연)", value: `${opt.expected_return_pct}%`, hint: "과거 1년 수익률 기반 연율화" },
-            { label: "최적 변동성 (연)", value: `${opt.volatility_pct}%`, hint: "수익률의 연율화 표준편차(위험)" },
+            { label: "최적 연평균 복리(CAGR)", value: `${opt.cagr_pct ?? opt.expected_return_pct}%`, hint: `${period.years || 1}년 백테스트 기준 실제 복리 수익률` },
+            { label: "최적 최종 평가액", value: formatNum(opt.final_value, "원"), hint: `초기 ${formatNum(data.initial_capital, "원")} 투자 시` },
             { label: "최대 샤프지수", value: `${opt.sharpe_ratio}`, hint: "위험 대비 초과수익 (높을수록 우수)" },
             { label: "최적 포트폴리오 MDD", value: `${opt.mdd_pct}%`, hint: "고점 대비 최대 하락폭" },
-            { label: "동일비중 기대수익률", value: `${eq.expected_return_pct}%`, hint: "모든 종목을 똑같이 나눴을 때" },
+            { label: "동일비중 CAGR / 최종액", value: `${eq.cagr_pct ?? eq.expected_return_pct}% / ${formatNum(eq.final_value, "원")}`, hint: "모든 종목을 똑같이 나눴을 때" },
             { label: "동일비중 샤프 / MDD", value: `${eq.sharpe_ratio} / ${eq.mdd_pct}%`, hint: "최적 비중과 성과 비교" },
         ];
 
@@ -527,6 +541,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const vals = [
                 displayName,
                 `${a.optimal_weight_pct}%`,
+                formatNum(a.target_amount, "원"),
                 `${a.min_vol_weight_pct}%`,
                 `${a.equal_weight_pct}%`,
                 `${a.annual_return_pct}%`,
@@ -539,6 +554,43 @@ document.addEventListener("DOMContentLoaded", () => {
                 tr.appendChild(td);
             });
             t2AssetsTbody.appendChild(tr);
+        });
+
+        // 누적 자산 성장 곡선 & MDD 추이 차트
+        const eqCurve = data.equity_curve || [];
+        const eqLabels = eqCurve.map((p) => p.date);
+        if (t2EquityChart) t2EquityChart.destroy();
+        t2EquityChart = new Chart(document.getElementById("t2-equity-chart"), {
+            type: "line",
+            data: {
+                labels: eqLabels,
+                datasets: [
+                    { label: "최적 비중 (최대 샤프)", data: eqCurve.map((p) => p.optimal_value), borderColor: "#2563eb", borderWidth: 2, pointRadius: 0 },
+                    { label: "동일 비중", data: eqCurve.map((p) => p.equal_value), borderColor: "#10b981", borderWidth: 1.8, borderDash: [4, 4], pointRadius: 0 },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+            },
+        });
+
+        if (t2DdChart) t2DdChart.destroy();
+        t2DdChart = new Chart(document.getElementById("t2-dd-chart"), {
+            type: "line",
+            data: {
+                labels: eqLabels,
+                datasets: [
+                    { label: "최적 비중 낙폭 (%)", data: eqCurve.map((p) => p.optimal_dd_pct), borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.12)", fill: true, borderWidth: 1.8, pointRadius: 0 },
+                    { label: "동일 비중 낙폭 (%)", data: eqCurve.map((p) => p.equal_dd_pct), borderColor: "#64748b", borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+                ],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+            },
         });
 
         // 비중 도넛 차트

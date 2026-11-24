@@ -208,9 +208,12 @@ def chat_analysis():
 
 @app.route("/api/rebalance", methods=["POST"])
 def api_rebalance():
-    """탭 2: Dify 없이 Python(FDR + 몬테카를로/효율적 프론티어)으로 리밸런싱 비중 계산"""
+    """탭 2: Dify 없이 Python(FDR + 몬테카를로/효율적 프론티어 + 백테스트)으로 리밸런싱 비중 계산"""
     body = request.get_json(silent=True) or {}
     raw_codes = body.get("codes", [])
+    years = body.get("years", 1)
+    rebalance_freq = body.get("rebalance_freq", "none")
+    initial_capital = body.get("initial_capital", 10_000_000)
 
     if isinstance(raw_codes, str):
         codes = [c.strip() for c in raw_codes.replace("\n", ",").split(",") if c.strip()]
@@ -219,8 +222,13 @@ def api_rebalance():
     else:
         return jsonify({"error": "종목코드 목록 형식이 올바르지 않습니다."}), 400
 
-    logger.info(f"[REBALANCE] 리밸런싱 계산 요청 수신 (codes={codes})")
-    result, err = calculate_rebalancing(codes)
+    logger.info(f"[REBALANCE] 리밸런싱 계산 요청 수신 (codes={codes}, years={years}, freq={rebalance_freq})")
+    result, err = calculate_rebalancing(
+        codes,
+        years=years,
+        rebalance_freq=rebalance_freq,
+        initial_capital=initial_capital,
+    )
     if err:
         return jsonify({"error": err}), 400
 

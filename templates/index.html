@@ -153,9 +153,33 @@
                 <p class="panel-desc">보유 종목/ETF 코드(2개 이상)를 쉼표로 구분해 입력하면 최근 1년 주가(FinanceDataReader)로 몬테카를로·효율적 프론티어를 계산합니다.</p>
 
                 <form id="t2-form" class="search-form">
-                    <input type="text" id="t2-codes-input" value="005930, 000660, 069500" placeholder="예: 005930, 000660, 069500" required>
-                    <button type="submit" id="t2-calc-btn">적정 비중 계산</button>
+                    <input type="text" id="t2-codes-input" value="005930, 000660, 069500" placeholder="예: 005930, 000660, 069500, AAPL, SPY" required>
+                    <button type="submit" id="t2-calc-btn">적정 비중 &amp; 백테스트</button>
                 </form>
+
+                <div class="t2-options-row" style="display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; align-items:center;">
+                    <label style="font-size:0.88rem; color:#475569;">
+                        백테스트 기간:
+                        <select id="t2-years" style="margin-left:4px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px;">
+                            <option value="1" selected>최근 1년</option>
+                            <option value="3">최근 3년</option>
+                            <option value="5">최근 5년</option>
+                        </select>
+                    </label>
+                    <label style="font-size:0.88rem; color:#475569;">
+                        리밸런싱 주기:
+                        <select id="t2-freq" style="margin-left:4px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px;">
+                            <option value="none" selected>없음 (Buy &amp; Hold)</option>
+                            <option value="M">매월</option>
+                            <option value="Q">분기별</option>
+                            <option value="Y">매년</option>
+                        </select>
+                    </label>
+                    <label style="font-size:0.88rem; color:#475569;">
+                        총 투자금액(원):
+                        <input type="number" id="t2-capital" value="10000000" min="100000" step="100000" style="width:140px; margin-left:4px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:8px;">
+                    </label>
+                </div>
 
                 <div class="sample-codes">
                     <span>추천 조합:</span>
@@ -163,6 +187,7 @@
                     <button type="button" class="sample-btn t2-preset" data-codes="005930, 035420, 005380, 069500">반도체 + 플랫폼 + 자동차 + 지수ETF</button>
                     <button type="button" class="sample-btn t2-preset" data-codes="AAPL, NVDA, MSFT, SPY">미국 빅테크 + S&amp;P500 (AAPL, NVDA, MSFT, SPY)</button>
                     <button type="button" class="sample-btn t2-preset" data-codes="SPY, TLT, GLD">글로벌 자산배분 (SPY, TLT, GLD)</button>
+                    <button type="button" class="sample-btn t2-preset" data-codes="SPY, TLT, IEF, GLD">올웨더 맛보기 (SPY, TLT, IEF, GLD)</button>
                 </div>
 
                 <div id="t2-status" class="status-box hidden"></div>
@@ -173,6 +198,21 @@
                 <div class="card">
                     <h3>포트폴리오 성과 비교 (최근 1년 기준)</h3>
                     <div id="t2-summary-grid" class="snapshot-grid"></div>
+                </div>
+
+                <div class="chart-two-col">
+                    <div class="card">
+                        <h3>누적 자산 성장 곡선 (백테스트)</h3>
+                        <div class="chart-box">
+                            <canvas id="t2-equity-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3>낙폭 (MDD) 추이 (%)</h3>
+                        <div class="chart-box">
+                            <canvas id="t2-dd-chart"></canvas>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="chart-two-col">
@@ -191,13 +231,14 @@
                 </div>
 
                 <div class="card">
-                    <h3>종목별 비중 및 위험·수익 지표</h3>
+                    <h3>종목별 비중 · 목표 투자금 · 위험·수익 지표</h3>
                     <div class="table-wrap">
                         <table class="finance-table">
                             <thead>
                                 <tr>
                                     <th>종목명 (코드)</th>
                                     <th>최적 비중</th>
+                                    <th>목표 투자금</th>
                                     <th>최소변동성 비중</th>
                                     <th>동일 비중</th>
                                     <th>연 기대수익률</th>

@@ -35,10 +35,59 @@ def _compute_mdd(daily_returns):
     return round(float(drawdown.min() * 100.0), 2)
 
 
-def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
+def _simulate_portfolio_curve(price_df, weights, rebalance_freq="none", initial_capital=10_000_000):
     """
-    최근 1년 FinanceDataReader 종가 데이터를 바탕으로
-    단순화 몬테카를로 시뮬레이션 및 효율적 프론티어 기반 적정 비중을 계산합니다.
+    일별 종가 DataFrame과 목표 비중으로 리밸런싱 주기를 반영한 자산 성장 곡선, CAGR, MDD 시계열을 계산합니다.
+    rebalance_freq: 'none' (리밸런싱 없음), 'M' (월간), 'Q' (분기), 'Y' (연간)
+    """
+    prices = price_df.values.astype(float)
+    dates = price_df.index
+    n_days = len(dates)
+    if n_days == 0:
+        return np.array([]), np.array([]), 0.0, 0.0
+
+    shares = (initial_capital * weights) / prices[0]
+    values = np.empty(n_days, dtype=float)
+
+    def _period_key(d):
+        if rebalance_freq == "M":
+            return (d.year, d.month)
+        if rebalance_freq == "Q":
+            return (d.year, (d.month - 1) // 3)
+        if rebalance_freq == "Y":
+            return d.year
+        return None
+
+    prev_key = _period_key(dates[0]) if rebalance_freq != "none" else None
+    for t in range(n_days):
+        total_val = float(np.dot(shares, prices[t]))
+        values[t] = total_val
+        if rebalance_freq != "none" and t > 0:
+            cur_key = _period_key(dates[t])
+            if cur_key != prev_key:
+                shares = (total_val * weights) / prices[t]
+                prev_key = cur_key
+
+    running_max = np.maximum.accumulate(values)
+    dd_series = (values - running_max) / running_max * 100.0
+    mdd_pct = round(float(dd_series.min()), 2)
+
+    years_elapsed = max(n_days - 1, 1) / 252.0
+    cagr_pct = round(float(((values[-1] / initial_capital) ** (1.0 / years_elapsed) - 1.0) * 100.0), 2)
+    return values, dd_series, cagr_pct, mdd_pct
+
+
+def calculate_rebalancing(
+    codes,
+    num_portfolios=2500,
+    risk_free_rate=0.035,
+    years=1,
+    rebalance_freq="none",
+    initial_capital=10_000_000,
+):
+    """
+    FinanceDataReader 종가 데이터를 바탕으로
+    몬테카를로·효율적 프론티어 적정 비중, 누적 수익률 곡선, CAGR, MDD, 목표 투자금을 계산합니다.
     """
     cleaned_codes, err = _clean_codes(codes)
     if err:
@@ -47,12 +96,30 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
     if len(cleaned_codes) < 2:
         return None, "리밸런싱 계산을 위해 서로 다른 종목/ETF 코드를 2개 이상 입력해 주세요."
 
+    try:
+        years = int(years)
+    except (TypeError, ValueError):
+        years = 1
+    if years not in (1, 3, 5):
+        years = 1
+
+    rebalance_freq = str(rebalance_freq or "none").upper()
+    if rebalance_freq not in ("NONE", "M", "Q", "Y"):
+        rebalance_freq = "none"
+    elif rebalance_freq == "NONE":
+        rebalance_freq = "none"
+
+    try:
+        initial_capital = max(100_000, float(initial_capital))
+    except (TypeError, ValueError):
+        initial_capital = 10_000_000.0
+
     end_date = dt.date.today()
-    start_date = end_date - dt.timedelta(days=365)
+    start_date = end_date - dt.timedelta(days=365 * years)
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
-    logger.info(f"[QUANT] 리밸런싱 데이터 수집 시작 (codes={cleaned_codes}, {start_str}~{end_str})")
+    logger.info(f"[QUANT] 리밸런싱 데이터 수집 시작 (codes={cleaned_codes}, {start_str}~{end_str}, freq={rebalance_freq})")
 
     series_map = {}
     for code in cleaned_codes:
@@ -99,20 +166,42 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
     eq_vol = float(np.sqrt(equal_weights.T @ cov_matrix @ equal_weights))
     eq_sharpe = (eq_ret - risk_free_rate) / eq_vol if eq_vol > 0 else 0.0
 
-    # MDD 계산
-    best_daily = pd.Series(returns.values @ best_weights, index=returns.index)
-    eq_daily = pd.Series(returns.values @ equal_weights, index=returns.index)
+    # 백테스트 곡선 (리밸런싱 주기 및 초기 투자금 반영)
+    opt_curve, opt_dd, opt_cagr, opt_sim_mdd = _simulate_portfolio_curve(
+        price_df, best_weights, rebalance_freq=rebalance_freq, initial_capital=initial_capital
+    )
+    eq_curve, eq_dd, eq_cagr, eq_sim_mdd = _simulate_portfolio_curve(
+        price_df, equal_weights, rebalance_freq=rebalance_freq, initial_capital=initial_capital
+    )
 
-    # 개별 종목 요약 (연율화 수익률, 변동성, 최적 비중)
+    # 차트 시각화용 성장 곡선 및 MDD 샘플링 (최대 120포인트)
+    curve_step = max(1, len(price_df) // 120)
+    curve_indices = list(range(0, len(price_df), curve_step))
+    if curve_indices and curve_indices[-1] != len(price_df) - 1:
+        curve_indices.append(len(price_df) - 1)
+    equity_curve = [
+        {
+            "date": price_df.index[i].strftime("%Y-%m-%d") if hasattr(price_df.index[i], "strftime") else str(price_df.index[i]),
+            "optimal_value": round(float(opt_curve[i]), 0),
+            "equal_value": round(float(eq_curve[i]), 0),
+            "optimal_dd_pct": round(float(opt_dd[i]), 2),
+            "equal_dd_pct": round(float(eq_dd[i]), 2),
+        }
+        for i in curve_indices
+    ]
+
+    # 개별 종목 요약 (연율화 수익률, 변동성, 최적 비중, 목표 투자금)
     assets_summary = []
     for i, code in enumerate(cleaned_codes):
         asset_daily = returns[code]
         asset_ret = float(mean_returns[i] * 100.0)
         asset_vol = float(np.sqrt(cov_matrix[i, i]) * 100.0)
+        opt_w_pct = round(float(best_weights[i] * 100.0), 2)
         assets_summary.append({
             "code": code,
             "name": fetch_stock_name(code),
-            "optimal_weight_pct": round(float(best_weights[i] * 100.0), 2),
+            "optimal_weight_pct": opt_w_pct,
+            "target_amount": round(float(initial_capital * best_weights[i]), 0),
             "min_vol_weight_pct": round(float(min_vol_weights[i] * 100.0), 2),
             "equal_weight_pct": round(float(equal_weights[i] * 100.0), 2),
             "annual_return_pct": round(asset_ret, 2),
@@ -132,15 +221,24 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
     ]
 
     result = {
-        "period": {"start": start_str, "end": end_str, "trading_days": int(len(returns))},
+        "period": {
+            "start": start_str,
+            "end": end_str,
+            "years": years,
+            "rebalance_freq": rebalance_freq,
+            "trading_days": int(len(returns)),
+        },
+        "initial_capital": round(float(initial_capital), 0),
         "num_simulations": int(num_portfolios),
         "risk_free_rate_pct": round(risk_free_rate * 100.0, 2),
         "assets": assets_summary,
         "optimal_portfolio": {
             "expected_return_pct": round(float(port_returns[max_sharpe_idx] * 100.0), 2),
+            "cagr_pct": opt_cagr,
+            "final_value": round(float(opt_curve[-1]), 0) if len(opt_curve) else round(float(initial_capital), 0),
             "volatility_pct": round(float(port_vols[max_sharpe_idx] * 100.0), 2),
             "sharpe_ratio": round(float(sharpe_ratios[max_sharpe_idx]), 3),
-            "mdd_pct": _compute_mdd(best_daily),
+            "mdd_pct": opt_sim_mdd,
         },
         "min_vol_portfolio": {
             "expected_return_pct": round(float(port_returns[min_vol_idx] * 100.0), 2),
@@ -149,10 +247,13 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
         },
         "equal_portfolio": {
             "expected_return_pct": round(eq_ret * 100.0, 2),
+            "cagr_pct": eq_cagr,
+            "final_value": round(float(eq_curve[-1]), 0) if len(eq_curve) else round(float(initial_capital), 0),
             "volatility_pct": round(eq_vol * 100.0, 2),
             "sharpe_ratio": round(float(eq_sharpe), 3),
-            "mdd_pct": _compute_mdd(eq_daily),
+            "mdd_pct": eq_sim_mdd,
         },
+        "equity_curve": equity_curve,
         "frontier_points": frontier_points,
     }
 
