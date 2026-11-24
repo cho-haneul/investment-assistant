@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -180,6 +181,130 @@ def _fetch_cashflow_and_balance(api_key, corp_code):
     return None
 
 
+def _fetch_governance_and_org(api_key, corp_code, preferred_year=None):
+    """사업보고서(11011) 기준 현재 임원, 최대주주 지분율, 사업부문별 조직/인원 현황을 조회합니다."""
+    cur_year = dt.date.today().year
+    years = [preferred_year] if preferred_year else []
+    for y in (str(cur_year - 1), str(cur_year - 2)):
+        if y not in years:
+            years.append(y)
+
+    executives = []
+    shareholders = []
+    total_major_rate = 0.0
+    org_divisions = []
+    used_year = None
+
+    for yr in years:
+        # 1. 임원 현황
+        try:
+            r_ex = requests.get(
+                f"{DART_BASE_URL}/exctvSttus.json",
+                params={"crtfc_key": api_key, "corp_code": corp_code, "bsns_year": yr, "reprt_code": "11011"},
+                timeout=6,
+            ).json()
+            if r_ex.get("status") == "000" and r_ex.get("list"):
+                used_year = yr
+                for row in r_ex["list"][:20]:
+                    nm = (row.get("nm") or "").strip()
+                    if not nm or nm == "-":
+                        continue
+                    executives.append({
+                        "name": nm,
+                        "position": (row.get("ofcps") or "-").strip(),
+                        "role_type": (row.get("rgist_exctv_at") or "-").strip(),
+                        "full_time": (row.get("fte_at") or "-").strip(),
+                        "job": re.sub(r"\s+", " ", (row.get("chrg_job") or "-").replace("ㆍ", " ").strip()),
+                        "tenure": (row.get("hffc_pd") or "-").strip(),
+                    })
+        except Exception as e:
+            logger.warning(f"[DART] exctvSttus 실패: {e}")
+
+        # 2. 최대주주 및 특수관계인 지분율 (보통주 기준)
+        try:
+            r_sh = requests.get(
+                f"{DART_BASE_URL}/hyslrSttus.json",
+                params={"crtfc_key": api_key, "corp_code": corp_code, "bsns_year": yr, "reprt_code": "11011"},
+                timeout=6,
+            ).json()
+            if r_sh.get("status") == "000" and r_sh.get("list"):
+                used_year = used_year or yr
+                seen_sh = set()
+                for row in r_sh["list"]:
+                    nm = (row.get("nm") or "").strip()
+                    kind = (row.get("stock_knd") or "").strip()
+                    if not nm or nm in ("계", "합계") or (kind and "보통주" not in kind):
+                        continue
+                    try:
+                        rate = float(str(row.get("trmend_posesn_stock_qota_rt") or "0").replace(",", "").strip())
+                    except ValueError:
+                        rate = 0.0
+                    if rate <= 0 or nm in seen_sh:
+                        continue
+                    seen_sh.add(nm)
+                    shareholders.append({
+                        "name": nm,
+                        "relation": (row.get("relate") or "-").strip(),
+                        "shares": (row.get("trmend_posesn_stock_co") or "-").strip(),
+                        "rate_pct": round(rate, 2),
+                    })
+                shareholders.sort(key=lambda x: x["rate_pct"], reverse=True)
+                total_major_rate = round(sum(s["rate_pct"] for s in shareholders), 2)
+                shareholders = shareholders[:12]
+        except Exception as e:
+            logger.warning(f"[DART] hyslrSttus 실패: {e}")
+
+        # 3. 사업부문별 조직/직원 현황
+        try:
+            r_emp = requests.get(
+                f"{DART_BASE_URL}/empSttus.json",
+                params={"crtfc_key": api_key, "corp_code": corp_code, "bsns_year": yr, "reprt_code": "11011"},
+                timeout=6,
+            ).json()
+            if r_emp.get("status") == "000" and r_emp.get("list"):
+                used_year = used_year or yr
+                div_map = {}
+                for row in r_emp["list"]:
+                    div = (row.get("fo_bbm") or "전사").strip()
+                    if div in ("합계", "계", "성별합계", "전체합계", "총계"):
+                        continue
+                    try:
+                        cnt = int(float(str(row.get("sm") or "0").replace(",", "").strip()))
+                    except ValueError:
+                        cnt = 0
+                    try:
+                        tn = float(str(row.get("avrg_cnwk_sdytrn") or "0").replace(",", "").strip())
+                    except ValueError:
+                        tn = 0.0
+                    if div not in div_map:
+                        div_map[div] = {"division": div, "total_employees": 0, "tenures": []}
+                    div_map[div]["total_employees"] += cnt
+                    if tn > 0:
+                        div_map[div]["tenures"].append(tn)
+                for dv in div_map.values():
+                    if dv["total_employees"] > 0:
+                        avg_t = round(sum(dv["tenures"]) / len(dv["tenures"]), 1) if dv["tenures"] else None
+                        org_divisions.append({
+                            "division": dv["division"],
+                            "total_employees": dv["total_employees"],
+                            "avg_tenure": avg_t,
+                        })
+                org_divisions.sort(key=lambda x: x["total_employees"], reverse=True)
+        except Exception as e:
+            logger.warning(f"[DART] empSttus 실패: {e}")
+
+        if executives or shareholders or org_divisions:
+            break
+
+    return {
+        "bsns_year": used_year,
+        "executives": executives,
+        "shareholders": shareholders,
+        "total_major_rate_pct": min(100.0, total_major_rate),
+        "org_divisions": org_divisions,
+    }
+
+
 def collect_dart_data(stock_code):
     """
     6자리 국내 상장 종목코드(또는 종목명)를 받아 Open DART에서
@@ -265,6 +390,10 @@ def collect_dart_data(stock_code):
     # 3. 현금흐름표 & 요약 재무상태
     financial_health = _fetch_cashflow_and_balance(api_key, corp_code)
 
+    # 3-2. 현재 임원 · 최대주주 지분율 · 사업부문별 조직 현황
+    pref_yr = financial_health.get("bsns_year") if isinstance(financial_health, dict) else None
+    governance = _fetch_governance_and_org(api_key, corp_code, preferred_year=pref_yr)
+
     # 4. 임원·주요주주 소유상황 (elestock.json, 최근 8건)
     insider_trades = []
     try:
@@ -316,4 +445,5 @@ def collect_dart_data(stock_code):
         "financial_health": financial_health,
         "insider_trades": insider_trades,
         "major_holders": major_holders,
+        "governance": governance,
     }, None

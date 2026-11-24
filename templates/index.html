@@ -538,6 +538,53 @@
                         </table>
                     </div>
                 </div>
+
+                <div id="t4-shareholder-card" class="card hidden">
+                    <div class="section-title-row">
+                        <h3 id="t4-shareholder-title">최대주주 및 특수관계인 지분율</h3>
+                        <span id="t4-shareholder-total" class="badge-python">-</span>
+                    </div>
+                    <div class="chart-two-col">
+                        <div class="chart-box">
+                            <canvas id="t4-shareholder-chart"></canvas>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="finance-table">
+                                <thead>
+                                    <tr>
+                                        <th>주주명</th>
+                                        <th>관계</th>
+                                        <th>보유 주식수</th>
+                                        <th>지분율</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="t4-shareholder-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="t4-org-card" class="card hidden">
+                    <div class="section-title-row">
+                        <h3 id="t4-org-title">조직도 · 사업부문 &amp; 현재 임원 현황</h3>
+                        <span class="unit-note">DART 사업보고서 공식 등기임원·사업부문 인원 기준</span>
+                    </div>
+                    <div id="t4-org-tree" class="org-tree"></div>
+                    <div class="table-wrap" style="margin-top: 16px;">
+                        <table class="finance-table">
+                            <thead>
+                                <tr>
+                                    <th>성명</th>
+                                    <th>직위</th>
+                                    <th>구분</th>
+                                    <th>담당업무</th>
+                                    <th>재직기간</th>
+                                </tr>
+                            </thead>
+                            <tbody id="t4-exec-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div class="card">

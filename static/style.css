@@ -937,3 +937,67 @@ body {
     .stock-header { flex-direction: column; }
     .price-box { text-align: left; }
 }
+.org-tree {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+    border-radius: 10px;
+}
+
+.org-root {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(56, 189, 248, 0.16));
+    border: 1px solid rgba(167, 139, 250, 0.45);
+    border-radius: 10px;
+    padding: 10px 20px;
+    text-align: center;
+}
+
+.org-root-title {
+    font-size: 0.96rem;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.org-root-sub {
+    font-size: 0.78rem;
+    color: #c4b5fd;
+    margin-top: 2px;
+}
+
+.org-connector {
+    width: 1px;
+    height: 16px;
+    background: rgba(167, 139, 250, 0.45);
+}
+
+.org-branches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+.org-node {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-glass);
+    border-top: 2px solid var(--sky);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.org-node-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+}
+
+.org-node-meta {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}

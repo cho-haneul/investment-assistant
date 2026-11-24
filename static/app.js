@@ -1570,6 +1570,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let t4CachedDartData = null;
     let t4ConversationId = null;
     let t4CfChart = null;
+    let t4ShareholderChart = null;
 
     const t4Form = document.getElementById("t4-form");
     const t4CodeInput = document.getElementById("t4-code-input");
@@ -1588,6 +1589,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const t4CfGrid = document.getElementById("t4-cf-grid");
     const t4DiscTbody = document.getElementById("t4-disc-tbody");
     const t4InsiderTbody = document.getElementById("t4-insider-tbody");
+    const t4ShareholderCard = document.getElementById("t4-shareholder-card");
+    const t4ShareholderTitle = document.getElementById("t4-shareholder-title");
+    const t4ShareholderTotal = document.getElementById("t4-shareholder-total");
+    const t4ShareholderTbody = document.getElementById("t4-shareholder-tbody");
+    const t4OrgCard = document.getElementById("t4-org-card");
+    const t4OrgTitle = document.getElementById("t4-org-title");
+    const t4OrgTree = document.getElementById("t4-org-tree");
+    const t4ExecTbody = document.getElementById("t4-exec-tbody");
     const t4ChatBox = document.getElementById("t4-chat-box");
     const t4ChatForm = document.getElementById("t4-chat-form");
     const t4QueryInput = document.getElementById("t4-query-input");
@@ -1752,6 +1761,120 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 t4InsiderTbody.appendChild(tr);
             });
+        }
+
+        // 최대주주 및 특수관계인 지분율
+        const gov = data.governance || {};
+        const shList = gov.shareholders || [];
+        if (shList.length > 0 && t4ShareholderCard) {
+            showEl(t4ShareholderCard);
+            if (t4ShareholderTitle) {
+                t4ShareholderTitle.textContent = `최대주주 및 특수관계인 지분율 (${gov.bsns_year || ""}년 사업보고서 기준)`;
+            }
+            if (t4ShareholderTotal) {
+                t4ShareholderTotal.textContent = `최대주주 측 합계 ${gov.total_major_rate_pct ?? 0}%`;
+            }
+            t4ShareholderTbody.innerHTML = "";
+            shList.forEach((s) => {
+                const tr = document.createElement("tr");
+                [s.name, s.relation, s.shares, `${s.rate_pct}%`].forEach((v) => {
+                    const td = document.createElement("td");
+                    td.textContent = v;
+                    tr.appendChild(td);
+                });
+                t4ShareholderTbody.appendChild(tr);
+            });
+
+            const topSh = shList.slice(0, 6);
+            const topSum = topSh.reduce((acc, x) => acc + x.rate_pct, 0);
+            const otherRate = Math.max(0, Number((100 - topSum).toFixed(2)));
+            const chartLabels = [...topSh.map((x) => `${x.name} (${x.rate_pct}%)`), `기타 주주 (${otherRate}%)`];
+            const chartVals = [...topSh.map((x) => x.rate_pct), otherRate];
+            const palette = ["#7c3aed", "#38bdf8", "#a78bfa", "#0ea5e9", "#c4b5fd", "#7dd3fc", "#3f3f46"];
+
+            if (t4ShareholderChart) t4ShareholderChart.destroy();
+            t4ShareholderChart = new Chart(document.getElementById("t4-shareholder-chart"), {
+                type: "doughnut",
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        data: chartVals,
+                        backgroundColor: chartVals.map((_, i) => palette[i % palette.length]),
+                        borderColor: "#09090b",
+                        borderWidth: 2,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: "bottom" } },
+                },
+            });
+        } else if (t4ShareholderCard) {
+            hideEl(t4ShareholderCard);
+        }
+
+        // 조직도 · 사업부문 & 현재 임원 현황
+        const execList = gov.executives || [];
+        const orgList = gov.org_divisions || [];
+        if ((execList.length > 0 || orgList.length > 0) && t4OrgCard) {
+            showEl(t4OrgCard);
+            if (t4OrgTitle) {
+                t4OrgTitle.textContent = `조직도 · 사업부문 & 현재 임원 현황 (${gov.bsns_year || ""}년 기준)`;
+            }
+
+            // 조직도 트리 렌더링
+            t4OrgTree.innerHTML = "";
+            const ceoNames = execList
+                .filter((e) => (e.role_type || "").includes("사내이사"))
+                .slice(0, 4)
+                .map((e) => `${e.name} ${e.position}`)
+                .join(" · ");
+
+            const rootDiv = document.createElement("div");
+            rootDiv.className = "org-root";
+            rootDiv.innerHTML = `<div class="org-root-title"></div><div class="org-root-sub"></div>`;
+            rootDiv.querySelector(".org-root-title").textContent = `${data.name} (대표: ${comp.ceo_name || "-"})`;
+            rootDiv.querySelector(".org-root-sub").textContent = ceoNames ? `사내이사: ${ceoNames}` : `등기임원 ${execList.length}명`;
+            t4OrgTree.appendChild(rootDiv);
+
+            if (orgList.length > 0) {
+                const conn = document.createElement("div");
+                conn.className = "org-connector";
+                t4OrgTree.appendChild(conn);
+
+                const branches = document.createElement("div");
+                branches.className = "org-branches";
+                orgList.forEach((d) => {
+                    const node = document.createElement("div");
+                    node.className = "org-node";
+                    node.innerHTML = `<div class="org-node-title"></div><div class="org-node-meta"></div>`;
+                    node.querySelector(".org-node-title").textContent = d.division;
+                    node.querySelector(".org-node-meta").textContent =
+                        `임직원 ${d.total_employees.toLocaleString("ko-KR")}명` +
+                        (d.avg_tenure ? ` · 평균근속 ${d.avg_tenure}년` : "");
+                    branches.appendChild(node);
+                });
+                t4OrgTree.appendChild(branches);
+            }
+
+            // 현재 임원 테이블
+            t4ExecTbody.innerHTML = "";
+            if (execList.length === 0) {
+                t4ExecTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">조회된 등기임원 현황이 없습니다.</td></tr>`;
+            } else {
+                execList.forEach((ex) => {
+                    const tr = document.createElement("tr");
+                    [ex.name, ex.position, `${ex.role_type} (${ex.full_time})`, ex.job, ex.tenure].forEach((v) => {
+                        const td = document.createElement("td");
+                        td.textContent = v;
+                        tr.appendChild(td);
+                    });
+                    t4ExecTbody.appendChild(tr);
+                });
+            }
+        } else if (t4OrgCard) {
+            hideEl(t4OrgCard);
         }
     }
 
