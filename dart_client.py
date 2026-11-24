@@ -182,12 +182,19 @@ def _fetch_cashflow_and_balance(api_key, corp_code):
 
 def collect_dart_data(stock_code):
     """
-    6자리 국내 상장 종목코드를 받아 Open DART에서
+    6자리 국내 상장 종목코드(또는 종목명)를 받아 Open DART에서
     기업 개황, 최근 90일 공시 목록, 현금흐름표, 임원·대주주 지분 변동을 수집합니다.
     """
-    code = str(stock_code or "").strip().upper()
-    if len(code) != 6 or not code.isdigit():
-        return None, "DART 공시는 국내 상장 6자리 숫자 종목코드만 지원합니다. (예: 005930, 000660)"
+    raw = str(stock_code or "").strip().upper()
+    if len(raw) != 6 or not raw.isdigit():
+        from collector import resolve_stock_input
+        resolved, r_err = resolve_stock_input(stock_code)
+        if resolved and len(resolved) == 6 and resolved.isdigit():
+            code = resolved
+        else:
+            return None, "DART 공시는 국내 상장 6자리 숫자 종목코드(또는 국내 상장사 이름)만 지원합니다. (예: 005930, 삼성전자)"
+    else:
+        code = raw
 
     api_key = _get_api_key()
     if not api_key:

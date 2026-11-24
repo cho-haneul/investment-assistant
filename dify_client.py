@@ -138,12 +138,28 @@ def ask_analysis_bot(query, inputs=None, conversation_id=None, user="investment-
 
 
 def ask_tech_bot(query, inputs=None, conversation_id=None, user="investment-user"):
-    """탭 3: 기술지표 설명 챗봇(지표해석기) 호출"""
+    """
+    탭 3: 기술지표 설명 챗봇(지표해석기) 호출.
+    지표해석기 챗봇의 무료 할당량 소진(quota exhausted) 시 투자종목분석기(Gemini)로 자동 폴백합니다.
+    """
     api_key = os.getenv("DIFY_TECH_API_KEY")
-    return send_chat_message(
+    res, err = send_chat_message(
         api_key=api_key,
         query=query,
         inputs=inputs,
         conversation_id=conversation_id,
         user=user,
     )
+    if err and any(k in err.lower() for k in ("quota", "exhausted", "provider credentials")):
+        logger.warning("[DIFY] 지표해석기 할당량 소진 감지 -> 투자종목분석기(Gemini)로 자동 폴백")
+        fallback_query = (
+            "당신은 주식·ETF 기술지표(이동평균선, RSI, MACD, 볼린저밴드) 전문 해설가입니다.\n"
+            f"{query}"
+        )
+        return ask_analysis_bot(
+            query=fallback_query,
+            inputs=inputs,
+            conversation_id=None,
+            user=user,
+        )
+    return res, err

@@ -183,10 +183,18 @@ def _search_via_serper(query):
         return []
 
     stop_words = {"USD", "KRW", "ETF", "SEC", "IPO", "CEO", "USA", "KOR", "AI", "MY", "IT", "PC", "TV", "PER", "PBR", "EPS", "BPS", "ROE", "ROA", "NYSE", "AMEX", "KOSPI"}
+    q_tokens = [tok for tok in re.split(r"\s+", query.strip().lower()) if len(tok) >= 2]
+    q_compact = re.sub(r"\s+", "", query.lower())
+
     ticker_counts = Counter()
     kr6_counts = Counter()
     for item in (data.get("organic") or []):
         txt = f"{item.get('title', '')} {item.get('snippet', '')}"
+        txt_compact = re.sub(r"\s+", "", txt.lower())
+        # 검색어 핵심 글자(2자 이상 토큰 또는 앞 2글자)가 실제 결과 스니펫에 포함된 경우만 신뢰
+        matched = (q_compact[:2] and q_compact[:2] in txt_compact) or any(tok in txt_compact for tok in q_tokens)
+        if not matched:
+            continue
         for t in re.findall(r"(?:[(:\s]|^|\b)([A-Z]{2,5})(?:[)\s.,]|$|\b)", txt):
             if t not in stop_words:
                 ticker_counts[t] += 1

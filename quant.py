@@ -3,13 +3,13 @@ import logging
 import FinanceDataReader as fdr
 import numpy as np
 import pandas as pd
-from collector import fetch_stock_name, is_us_ticker, validate_code
+from collector import fetch_stock_name, is_us_ticker, resolve_stock_input, validate_code
 
 logger = logging.getLogger(__name__)
 
 
 def _clean_codes(codes):
-    """종목코드 리스트(국내 6자리 또는 미국 티커)를 정제하고 중복을 제거합니다."""
+    """종목코드 리스트(국내 6자리, 미국 티커, 또는 종목명)를 정제하고 중복을 제거합니다."""
     cleaned = []
     seen = set()
     for c in codes:
@@ -18,7 +18,10 @@ def _clean_codes(codes):
             continue
         ok, validated = validate_code(raw)
         if not ok:
-            return None, validated
+            resolved, r_err = resolve_stock_input(raw)
+            if r_err or not resolved:
+                return None, r_err or validated
+            validated = resolved
         if validated not in seen:
             seen.add(validated)
             cleaned.append(validated)
@@ -400,7 +403,10 @@ def calculate_technical_indicators(code, days=365, chart_points=120):
     """
     ok, code_str = validate_code(code)
     if not ok:
-        return None, code_str
+        resolved, r_err = resolve_stock_input(code)
+        if r_err or not resolved:
+            return None, r_err or code_str
+        code_str = resolved
 
     is_us = is_us_ticker(code_str)
     price_digits = 2 if is_us else 0
@@ -491,7 +497,10 @@ def get_price_history(code, range_key="3m"):
     """
     ok, code_str = validate_code(code)
     if not ok:
-        return None, code_str
+        resolved, r_err = resolve_stock_input(code)
+        if r_err or not resolved:
+            return None, r_err or code_str
+        code_str = resolved
 
     days_map = {"1w": 10, "1m": 32, "3m": 92, "6m": 185, "1y": 366}
     r_key = str(range_key or "3m").lower()
