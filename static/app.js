@@ -255,6 +255,7 @@ document.addEventListener("DOMContentLoaded", () => {
             tabPanels.forEach((p) => p.classList.remove("active"));
             btn.classList.add("active");
             document.getElementById(targetId).classList.add("active");
+            if (typeof renderJumpRemote === "function") renderJumpRemote(targetId);
         });
     });
 
@@ -2087,18 +2088,64 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     renderRecentStocks();
 
-    // 3. 빠른 이동 리모컨
-    document.querySelectorAll(".side-jump-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-            const target = btn.dataset.jump;
-            if (target === "top") {
-                window.scrollTo({ top: 0, behavior: "smooth" });
-                return;
-            }
-            const el = document.getElementById(target);
-            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // 3. 빠른 이동 리모컨 (활성 탭에 맞춰 동적 변경)
+    const TAB_JUMP_MAP = {
+        "tab-analysis": [
+            { label: "↑ 맨 위로", target: "top" },
+            { label: "종목 검색 & 100만원 추천", target: "tab-analysis" },
+            { label: "주가 변동 그래프", target: "t1-price-card" },
+            { label: "스냅샷 · 재무 · 뉴스", target: "t1-stock-view" },
+            { label: "AI 애널리스트 채팅", target: "t1-chat-box" },
+        ],
+        "tab-rebalance": [
+            { label: "↑ 맨 위로", target: "top" },
+            { label: "종목 조합 & 백테스트 설정", target: "tab-rebalance" },
+            { label: "누적 성장 · MDD 차트", target: "t2-equity-chart" },
+            { label: "적정 비중 · 프론티어", target: "t2-weights-chart" },
+            { label: "매수/매도 수량 계산기", target: "t2-assets-tbody" },
+            { label: "연도별 수익률 비교", target: "t2-yearly-card" },
+        ],
+        "tab-technical": [
+            { label: "↑ 맨 위로", target: "top" },
+            { label: "종목 선택 & 지표 요약", target: "tab-technical" },
+            { label: "주가 · 이동평균 · 볼린저", target: "t3-price-chart" },
+            { label: "RSI · MACD 차트", target: "t3-rsi-chart" },
+            { label: "지표해석기 AI 채팅", target: "t3-chat-box" },
+        ],
+        "tab-dart": [
+            { label: "↑ 맨 위로", target: "top" },
+            { label: "기업 개황 & 현금흐름", target: "t4-company-title" },
+            { label: "최근 90일 주요 공시", target: "t4-disc-tbody" },
+            { label: "임원 지분변동 & 주주 지분율", target: "t4-insider-tbody" },
+            { label: "조직도 & 현재 임원", target: "t4-org-card" },
+            { label: "DART AI 공시 채팅", target: "t4-chat-box" },
+        ],
+    };
+
+    const sideJumpList = document.querySelector(".side-jump-list");
+    function renderJumpRemote(tabId) {
+        if (!sideJumpList) return;
+        const items = TAB_JUMP_MAP[tabId] || TAB_JUMP_MAP["tab-analysis"];
+        sideJumpList.innerHTML = "";
+        items.forEach((item) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "side-jump-btn";
+            btn.textContent = item.label;
+            btn.addEventListener("click", () => {
+                if (item.target === "top") {
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                    return;
+                }
+                const el = document.getElementById(item.target);
+                if (!el) return;
+                const scrollTarget = el.closest(".card") || el;
+                scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+            sideJumpList.appendChild(btn);
         });
-    });
+    }
+    renderJumpRemote(document.querySelector(".tab-btn.active")?.dataset.tab || "tab-analysis");
 
     // 4. 물타기 · 평단가 계산기
     const calcCurPrice = document.getElementById("calc-cur-price");
