@@ -774,6 +774,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             t1CachedStockData = stockData;
             t1ConversationId = null;
+            if (typeof recordRecentStock === "function") recordRecentStock(stockData.code, stockData.name);
             renderTab1StockDashboard(stockData);
             showEl(t1StockView);
             loadTab1PriceChart(stockData.code, t1CurrentRange);
@@ -1990,5 +1991,241 @@ document.addEventListener("DOMContentLoaded", () => {
         } finally {
             t4SendBtn.disabled = false;
         }
+    });
+
+    // ==================== 좌우 사이드 위젯 로직 ====================
+    // 1. 주요 시장 지수 & 환율
+    const sideIndicesList = document.getElementById("side-indices-list");
+    const sideIndicesRefresh = document.getElementById("side-indices-refresh");
+
+    async function loadMarketIndices() {
+        if (!sideIndicesList) return;
+        try {
+            const resp = await fetch("/api/market_indices");
+            const data = await resp.json();
+            const items = data.items || [];
+            if (items.length === 0) {
+                sideIndicesList.innerHTML = `<div class="unit-note">지수 정보를 불러오지 못했습니다.</div>`;
+                return;
+            }
+            sideIndicesList.innerHTML = "";
+            items.forEach((it) => {
+                const row = document.createElement("div");
+                row.className = "side-index-row";
+                const isUp = it.change_pct > 0;
+                const isDown = it.change_pct < 0;
+                const cls = isUp ? "up" : isDown ? "down" : "flat";
+                const sign = isUp ? "+" : "";
+                row.innerHTML = `
+                    <span class="side-index-name"></span>
+                    <div class="side-index-val">
+                        <div class="idx-px"></div>
+                        <div class="idx-chg ${cls}" style="font-size:0.74rem;"></div>
+                    </div>
+                `;
+                row.querySelector(".side-index-name").textContent = it.name;
+                row.querySelector(".idx-px").textContent = Number(it.price).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+                row.querySelector(".idx-chg").textContent = `${sign}${it.change_pct}%`;
+                sideIndicesList.appendChild(row);
+            });
+        } catch {
+            sideIndicesList.innerHTML = `<div class="unit-note">지수 조회 실패</div>`;
+        }
+    }
+
+    if (sideIndicesRefresh) {
+        sideIndicesRefresh.addEventListener("click", loadMarketIndices);
+    }
+    loadMarketIndices();
+
+    // 2. 최근 조회 종목 히스토리
+    const RECENT_KEY = "mia_recent_v1";
+    const sideRecentList = document.getElementById("side-recent-list");
+    const sideRecentClear = document.getElementById("side-recent-clear");
+
+    function loadRecentStocks() {
+        try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
+        catch { return []; }
+    }
+
+    function renderRecentStocks() {
+        if (!sideRecentList) return;
+        const list = loadRecentStocks();
+        sideRecentList.innerHTML = "";
+        if (list.length === 0) {
+            sideRecentList.innerHTML = `<div class="unit-note">조회한 종목이 여기에 쌓입니다.</div>`;
+            return;
+        }
+        list.forEach((it) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "side-recent-btn";
+            btn.innerHTML = `<span class="r-name"></span><span class="unit-note"></span>`;
+            btn.querySelector(".r-name").textContent = it.name;
+            btn.querySelector(".unit-note").textContent = it.code;
+            btn.addEventListener("click", () => {
+                document.querySelector('.tab-btn[data-tab="tab-analysis"]')?.click();
+                t1CodeInput.value = it.code;
+                runTab1FetchAndAnalyze(it.code);
+            });
+            sideRecentList.appendChild(btn);
+        });
+    }
+
+    function recordRecentStock(code, name) {
+        if (!code) return;
+        const next = [{ code, name: name || code }, ...loadRecentStocks().filter((x) => x.code !== code)].slice(0, 7);
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+        renderRecentStocks();
+    }
+
+    if (sideRecentClear) {
+        sideRecentClear.addEventListener("click", () => {
+            localStorage.removeItem(RECENT_KEY);
+            renderRecentStocks();
+        });
+    }
+    renderRecentStocks();
+
+    // 3. 빠른 이동 리모컨
+    document.querySelectorAll(".side-jump-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const target = btn.dataset.jump;
+            if (target === "top") {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                return;
+            }
+            const el = document.getElementById(target);
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    });
+
+    // 4. 물타기 · 평단가 계산기
+    const calcCurPrice = document.getElementById("calc-cur-price");
+    const calcCurQty = document.getElementById("calc-cur-qty");
+    const calcAddPrice = document.getElementById("calc-add-price");
+    const calcAddQty = document.getElementById("calc-add-qty");
+    const calcResult = document.getElementById("calc-result");
+
+    function updateAvgCalculator() {
+        if (!calcResult) return;
+        const p1 = parseFloat(calcCurPrice?.value || "0") || 0;
+        const q1 = parseFloat(calcCurQty?.value || "0") || 0;
+        const p2 = parseFloat(calcAddPrice?.value || "0") || 0;
+        const q2 = parseFloat(calcAddQty?.value || "0") || 0;
+        const totalQty = q1 + q2;
+        if (totalQty <= 0 || (p1 <= 0 && p2 <= 0)) {
+            calcResult.textContent = "평단가와 수량을 입력하면 자동 계산됩니다.";
+            return;
+        }
+        const totalCost = p1 * q1 + p2 * q2;
+        const newAvg = totalCost / totalQty;
+        const diffPct = p1 > 0 ? ((newAvg - p1) / p1) * 100 : 0;
+        calcResult.innerHTML = `
+            <div>새 평단가: <strong>${newAvg.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}</strong> (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(1)}%)</div>
+            <div>총 수량: <strong>${totalQty.toLocaleString("ko-KR")}주</strong> · 총액: <strong>${Math.round(totalCost).toLocaleString("ko-KR")}</strong></div>
+        `;
+    }
+
+    [calcCurPrice, calcCurQty, calcAddPrice, calcAddQty].forEach((el) => {
+        if (el) el.addEventListener("input", updateAvgCalculator);
+    });
+
+    // 5. 내 투자 메모장
+    const MEMO_KEY = "mia_memo_v1";
+    const sideMemoInput = document.getElementById("side-memo-input");
+    const sideMemoStatus = document.getElementById("side-memo-status");
+    if (sideMemoInput) {
+        sideMemoInput.value = localStorage.getItem(MEMO_KEY) || "";
+        sideMemoInput.addEventListener("input", () => {
+            localStorage.setItem(MEMO_KEY, sideMemoInput.value);
+            if (sideMemoStatus) sideMemoStatus.textContent = "저장됨 ✓";
+        });
+    }
+
+    // 6. 초보자 용어 미니사전 (내장 사전 + AI 검색 폴백)
+    const GLOSSARY_DICT = {
+        "PER": "주가수익비율(주가÷주당순이익). 회사가 버는 이익 대비 주가가 몇 배인지 나타내며, 보통 낮을수록 저평가로 봅니다.",
+        "PBR": "주가순자산비율(주가÷주당순자산). 회사 순자산(청산가치) 대비 주가 수준이며, 1배 미만이면 자산가치보다 싸게 거래된다는 뜻입니다.",
+        "ROE": "자기자본이익률. 회사가 자기자본을 활용해 1년간 얼마의 순이익을 냈는지 보여주는 수익성 지표로 높을수록 좋습니다.",
+        "EPS": "주당순이익(순이익÷총주식수). 주식 1주가 1년 동안 벌어들이는 순이익 금액입니다.",
+        "BPS": "주당순자산가치(순자산÷총주식수). 회사가 지금 청산될 때 주식 1주당 돌아갈 수 있는 장부상 가치입니다.",
+        "시가총액": "현재 주가 × 상장주식수. 시장에서 평가하는 기업의 전체 몸값입니다.",
+        "배당수익률": "현재 주가 대비 1년간 받는 배당금 비율(%)입니다. 예금 이자율과 비교해 볼 수 있습니다.",
+        "컨센서스": "증권사 애널리스트들이 추정한 실적·목표주가의 평균 예측치입니다.",
+        "ETF": "상장지수펀드. 코스피200, S&P500 같은 지수나 테마를 추종하며 주식처럼 실시간 거래할 수 있는 펀드입니다.",
+        "NAV": "순자산가치. ETF 1좌(1주)가 실제로 보유한 자산들의 순수한 가치입니다.",
+        "괴리율": "ETF의 시장 거래 가격과 실제 가치(NAV) 사이의 차이(%)입니다. 0%에 가까울수록 제값에 거래되는 것입니다.",
+        "총보수": "ETF 운용사가 1년 동안 떼어가는 관리 수수료율(%)입니다. 장기 투자할수록 낮을수록 유리합니다.",
+        "분배금": "ETF가 보유한 주식의 배당금 등을 모아 투자자에게 나눠주는 돈(주식 배당과 같은 개념)입니다.",
+        "MDD": "최대낙폭(Maximum Drawdown). 투자 기간 중 고점 대비 가장 크게 떨어졌던 하락 폭(%)입니다.",
+        "샤프지수": "위험(변동성) 1단위당 얻은 초과수익입니다. 숫자가 높을수록 같은 위험 대비 성과가 좋은 포트폴리오입니다.",
+        "CAGR": "연평균 복리 수익률. 여러 해 동안의 수익을 매년 똑같은 복리로 불어났다고 환산한 실질 성장률입니다.",
+        "리밸런싱": "주가가 오르내려 틀어진 포트폴리오 비중을 원래 목표 비중으로 다시 맞추는 작업입니다.",
+        "모멘텀": "주가가 상승하거나 하락하는 추세의 힘입니다. 보통 이동평균선 위면 상승 모멘텀으로 봅니다.",
+        "이동평균선": "최근 N일간의 종가 평균을 이은 선(MA5, MA20, MA60 등)으로 주가의 흐름과 지지/저항을 봅니다.",
+        "RSI": "상대강도지수(0~100). 보통 70 이상이면 단기 과매수(과열), 30 이하면 과매도(침체) 구간으로 해석합니다.",
+        "MACD": "단기 이동평균과 장기 이동평균의 차이로 추세 전환을 포착하는 지표입니다. Signal선을 상향 돌파하면 매수 신호로 봅니다.",
+        "볼린저밴드": "이동평균선 위아래로 표준편차 범위를 그린 밴드입니다. 주가가 상단에 닿으면 과열, 하단에 닿으면 침체 가능성을 봅니다.",
+        "유상증자": "회사가 새 주식을 발행해 돈을 받고 자본금을 늘리는 것입니다. 기존 주주 지분이 희석될 수 있어 목적을 꼭 확인해야 합니다.",
+        "전환사채": "CB. 일정 조건에서 주식으로 바꿀 수 있는 채권입니다. 추후 주식으로 전환되면 물량이 늘어 주가에 부담이 될 수 있습니다.",
+        "자사주": "회사가 자기 회사의 주식을 직접 사들이는 것입니다. 소각하면 유통 주식 수가 줄어 주주에게 호재로 작용합니다.",
+        "영업활동현금흐름": "회사가 본업(제품·서비스 판매)으로 실제 현금을 얼마나 벌어들였는지 보여주는 지표입니다.",
+        "액면분할": "1주를 여러 주로 쪼개어 주가를 낮추고 거래를 활발하게 만드는 조치입니다. 기업 가치 자체는 변하지 않습니다.",
+        "공매도": "주식을 빌려서 먼저 판 뒤 주가가 떨어지면 싸게 사서 갚아 차익을 노리는 투자 기법입니다.",
+        "배당락일": "배당을 받을 권리가 사라지는 날입니다. 보통 배당락일 전날까지 주식을 보유해야 배당을 받습니다.",
+    };
+
+    const sideGlossaryForm = document.getElementById("side-glossary-form");
+    const sideGlossaryInput = document.getElementById("side-glossary-input");
+    const sideGlossaryResult = document.getElementById("side-glossary-result");
+
+    async function lookupGlossaryTerm(rawTerm) {
+        if (!sideGlossaryResult) return;
+        const term = String(rawTerm || "").trim();
+        if (!term) return;
+        if (sideGlossaryInput) sideGlossaryInput.value = term;
+
+        const norm = term.replace(/\s+/g, "").toUpperCase();
+        let matchedKey = Object.keys(GLOSSARY_DICT).find((k) => k.replace(/\s+/g, "").toUpperCase() === norm);
+        if (!matchedKey) {
+            matchedKey = Object.keys(GLOSSARY_DICT).find((k) => {
+                const kn = k.replace(/\s+/g, "").toUpperCase();
+                return kn.includes(norm) || norm.includes(kn);
+            });
+        }
+
+        if (matchedKey) {
+            sideGlossaryResult.innerHTML = `<strong style="color:#c4b5fd;">${matchedKey}</strong><br>${GLOSSARY_DICT[matchedKey]}`;
+            return;
+        }
+
+        sideGlossaryResult.textContent = `'${term}' 뜻을 AI 사전에서 찾는 중입니다...`;
+        try {
+            const resp = await fetch("/api/glossary", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ term }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.error) {
+                sideGlossaryResult.textContent = data.error || "용어 설명을 가져오지 못했습니다.";
+                return;
+            }
+            sideGlossaryResult.innerHTML = `<strong style="color:#7dd3fc;">${data.term}</strong><br>${data.meaning}`;
+        } catch (err) {
+            sideGlossaryResult.textContent = `사전 검색 오류: ${err.message}`;
+        }
+    }
+
+    if (sideGlossaryForm) {
+        sideGlossaryForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            lookupGlossaryTerm(sideGlossaryInput?.value);
+        });
+    }
+
+    document.querySelectorAll(".glossary-chip").forEach((btn) => {
+        btn.addEventListener("click", () => lookupGlossaryTerm(btn.dataset.term));
     });
 });

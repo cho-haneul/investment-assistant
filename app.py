@@ -21,6 +21,76 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+_MARKET_INDICES_CACHE = {"ts": 0.0, "items": []}
+
+
+@app.route("/api/market_indices", methods=["GET"])
+def api_market_indices():
+    """사이드바용 주요 시장 지수(코스피, 코스닥, S&P500, 나스닥, 원/달러) 반환 (5분 캐시)"""
+    import datetime as dt
+    import time
+    import FinanceDataReader as fdr
+
+    now = time.time()
+    if _MARKET_INDICES_CACHE["items"] and (now - _MARKET_INDICES_CACHE["ts"] < 300):
+        return jsonify({"items": _MARKET_INDICES_CACHE["items"]}), 200
+
+    targets = [
+        ("KS11", "코스피"),
+        ("KQ11", "코스닥"),
+        ("US500", "S&P 500"),
+        ("IXIC", "나스닥"),
+        ("USD/KRW", "원/달러"),
+    ]
+    end_d = dt.date.today()
+    start_d = end_d - dt.timedelta(days=12)
+    start_s = start_d.strftime("%Y-%m-%d")
+    end_s = end_d.strftime("%Y-%m-%d")
+
+    items = []
+    for sym, label in targets:
+        try:
+            df = fdr.DataReader(sym, start_s, end_s)
+            if df is None or df.empty or "Close" not in df.columns:
+                continue
+            closes = df["Close"].dropna()
+            if len(closes) == 0:
+                continue
+            cur = float(closes.iloc[-1])
+            prev = float(closes.iloc[-2]) if len(closes) >= 2 else cur
+            chg_pct = round(((cur - prev) / prev) * 100.0, 2) if prev > 0 else 0.0
+            items.append({
+                "symbol": sym,
+                "name": label,
+                "price": round(cur, 2),
+                "change_pct": chg_pct,
+            })
+        except Exception as e:
+            logger.warning(f"[INDICES] {sym} 조회 실패: {e}")
+
+    if items:
+        _MARKET_INDICES_CACHE["ts"] = now
+        _MARKET_INDICES_CACHE["items"] = items
+    return jsonify({"items": items}), 200
+
+
+@app.route("/api/glossary", methods=["POST"])
+def api_glossary():
+    """사이드바 초보자 용어 미니사전: 기본 사전에 없는 용어를 AI에게 2줄로 설명 요청"""
+    body = request.get_json(silent=True) or {}
+    term = str(body.get("term") or "").strip()
+    if not term:
+        return jsonify({"error": "검색할 용어를 입력해 주세요."}), 400
+
+    prompt = (
+        f"주식·투자 초보자를 위해 '{term}'이라는 투자 용어의 뜻을 "
+        "어려운 전문용어 없이 2문장 이내로 아주 쉽고 정확하게 설명해 주세요."
+    )
+    res, err = ask_analysis_bot(query=prompt, inputs={}, conversation_id=None)
+    if err:
+        return jsonify({"error": err}), 502
+    return jsonify({"term": term, "meaning": res.get("answer", "").strip()}), 200
+
 
 @app.route("/", methods=["GET"])
 def index():

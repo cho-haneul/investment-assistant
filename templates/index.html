@@ -10,7 +10,41 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 </head>
 <body>
-    <div class="container">
+    <div class="app-shell">
+        <!-- ==================== 왼쪽 사이드 위젯 ==================== -->
+        <aside class="side-rail left-rail">
+            <div class="side-card">
+                <div class="side-card-head">
+                    <span>주요 시장 지수</span>
+                    <button type="button" id="side-indices-refresh" class="side-mini-btn" title="새로고침">↻</button>
+                </div>
+                <div id="side-indices-list" class="side-indices-list">
+                    <div class="unit-note">불러오는 중...</div>
+                </div>
+            </div>
+
+            <div class="side-card">
+                <div class="side-card-head">
+                    <span>최근 조회 종목</span>
+                    <button type="button" id="side-recent-clear" class="side-mini-btn" title="비우기">지우기</button>
+                </div>
+                <div id="side-recent-list" class="side-recent-list">
+                    <div class="unit-note">조회한 종목이 여기에 쌓입니다.</div>
+                </div>
+            </div>
+
+            <div class="side-card side-sticky-nav">
+                <div class="side-card-head"><span>빠른 이동 리모컨</span></div>
+                <div class="side-jump-list">
+                    <button type="button" class="side-jump-btn" data-jump="top">↑ 맨 위로</button>
+                    <button type="button" class="side-jump-btn" data-jump="tab-analysis">종목 심층분석</button>
+                    <button type="button" class="side-jump-btn" data-jump="t1-price-card">주가 변동 그래프</button>
+                    <button type="button" class="side-jump-btn" data-jump="t1-chat-box">AI 애널리스트 채팅</button>
+                </div>
+            </div>
+        </aside>
+
+        <div class="container">
         <header class="page-header top-bar">
             <div>
                 <h1>나의 투자도우미 <span class="brand-sub">My Investment Assistant</span></h1>
@@ -607,6 +641,50 @@
         <footer class="app-footer">
             본 서비스의 시세·재무·ETF 정보는 네이버 금융 및 FinanceDataReader 데이터를 기반으로 제공되며, AI 분석 및 퀀트 시뮬레이션 결과는 투자 학습·참고용일 뿐 실제 투자 권유가 아닙니다.
         </footer>
+    </div>
+
+    <!-- ==================== 오른쪽 사이드 위젯 ==================== -->
+    <aside class="side-rail right-rail">
+        <div class="side-card">
+            <div class="side-card-head"><span>물타기 · 평단가 계산기</span></div>
+            <div class="calc-grid">
+                <label>현재 평단가<input type="number" id="calc-cur-price" placeholder="예: 70000" min="0" step="any"></label>
+                <label>보유 수량(주)<input type="number" id="calc-cur-qty" placeholder="예: 10" min="0" step="any"></label>
+                <label>추가 매수가<input type="number" id="calc-add-price" placeholder="예: 55000" min="0" step="any"></label>
+                <label>추가 수량(주)<input type="number" id="calc-add-qty" placeholder="예: 10" min="0" step="any"></label>
+            </div>
+            <div id="calc-result" class="calc-result">평단가와 수량을 입력하면 자동 계산됩니다.</div>
+        </div>
+
+        <div class="side-card">
+            <div class="side-card-head">
+                <span>내 투자 메모장</span>
+                <span id="side-memo-status" class="unit-note">자동 저장</span>
+            </div>
+            <textarea id="side-memo-input" class="side-memo-input" rows="4" placeholder="관심 종목 매수 기준이나 오늘의 아이디어를 적어두세요..."></textarea>
+        </div>
+
+        <div class="side-card">
+            <div class="side-card-head"><span>초보자 용어 미니사전</span></div>
+            <form id="side-glossary-form" class="side-glossary-form">
+                <input type="text" id="side-glossary-input" placeholder="용어 검색 (예: PER, 괴리율, 유상증자)" autocomplete="off">
+                <button type="submit">검색</button>
+            </form>
+            <div class="side-glossary-chips">
+                <button type="button" class="glossary-chip" data-term="PER">PER</button>
+                <button type="button" class="glossary-chip" data-term="PBR">PBR</button>
+                <button type="button" class="glossary-chip" data-term="ROE">ROE</button>
+                <button type="button" class="glossary-chip" data-term="MDD">MDD</button>
+                <button type="button" class="glossary-chip" data-term="샤프지수">샤프지수</button>
+                <button type="button" class="glossary-chip" data-term="괴리율">괴리율</button>
+                <button type="button" class="glossary-chip" data-term="RSI">RSI</button>
+                <button type="button" class="glossary-chip" data-term="유상증자">유상증자</button>
+            </div>
+            <div id="side-glossary-result" class="side-glossary-result">
+                궁금한 용어를 검색하거나 위 버튼을 눌러보세요.
+            </div>
+        </div>
+    </aside>
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
