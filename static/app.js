@@ -149,6 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1Error = document.getElementById("t1-error");
     const t1StockView = document.getElementById("t1-stock-view");
     const t1StockNameEl = document.getElementById("t1-stock-name");
+    const t1AssetBadgeEl = document.getElementById("t1-asset-badge");
     const t1StockMetaEl = document.getElementById("t1-stock-meta");
     const t1CurrentPriceEl = document.getElementById("t1-current-price");
     const t1PriceChangeEl = document.getElementById("t1-price-change");
@@ -356,6 +357,17 @@ document.addEventListener("DOMContentLoaded", () => {
         const etf = data.etf_info || {};
 
         t1StockNameEl.textContent = `${data.name} (${data.code})`;
+        if (t1AssetBadgeEl) {
+            t1AssetBadgeEl.className = "asset-badge";
+            if (isEtf) {
+                t1AssetBadgeEl.classList.add("badge-etf");
+                t1AssetBadgeEl.textContent = isUs ? "미국 ETF" : "국내 ETF";
+            } else {
+                t1AssetBadgeEl.classList.add("badge-stock");
+                t1AssetBadgeEl.textContent = isUs ? "미국 주식" : "국내 주식";
+            }
+            showEl(t1AssetBadgeEl);
+        }
         t1StockMetaEl.textContent = `${isUs ? "미국 · " : ""}${isEtf ? "ETF · " : ""}${snap.market || "-"} · 장 상태: ${snap.market_status || "-"}`;
         t1CurrentPriceEl.textContent = formatPrice(snap.current_price, currency);
 
