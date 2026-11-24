@@ -974,3 +974,53 @@ body {
     gap: 6px;
     align-items: center;
 }
+.alloc-card {
+    background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%);
+    border: 1.5px solid #6ee7b7;
+}
+
+.alloc-number-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.alloc-amount {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--green-deep);
+}
+
+.alloc-total {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-sub);
+}
+
+.alloc-bar-track {
+    height: 12px;
+    background: #d9e7df;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.alloc-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #047857 100%);
+    border-radius: 999px;
+    transition: width 0.5s ease;
+}
+
+.alloc-reason {
+    font-size: 0.93rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.alloc-disclaimer {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}

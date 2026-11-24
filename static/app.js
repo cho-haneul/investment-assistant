@@ -262,6 +262,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1UseTools = document.getElementById("t1-use-tools");
     const t1Status = document.getElementById("t1-status");
     const t1Error = document.getElementById("t1-error");
+    const t1AllocCard = document.getElementById("t1-alloc-card");
+    const t1AllocTarget = document.getElementById("t1-alloc-target");
+    const t1AllocAmount = document.getElementById("t1-alloc-amount");
+    const t1AllocBar = document.getElementById("t1-alloc-bar");
+    const t1AllocReason = document.getElementById("t1-alloc-reason");
     const t1StockView = document.getElementById("t1-stock-view");
     const t1StockNameEl = document.getElementById("t1-stock-name");
     const t1AssetBadgeEl = document.getElementById("t1-asset-badge");
@@ -665,6 +670,36 @@ document.addEventListener("DOMContentLoaded", () => {
 
             t1EvidenceJson.textContent = JSON.stringify(stockData, null, 2);
             showEl(t1EvidenceWrap);
+
+            // 100만원 가상 투자 추천 위젯 비동기 호출 (검색창 바로 아래 최상단 표시)
+            if (t1AllocCard) {
+                t1AllocTarget.textContent = `(${stockData.name})`;
+                t1AllocAmount.textContent = "계산 중...";
+                t1AllocBar.style.width = "0%";
+                t1AllocReason.textContent = "AI가 수집된 데이터를 바탕으로 0~100만원 추천 투자금을 계산 중입니다...";
+                showEl(t1AllocCard);
+
+                fetch("/api/allocate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ code: stockData.code, stock_data: stockData }),
+                })
+                    .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+                    .then(({ ok, d }) => {
+                        if (!ok || d.error || d.amount_manwon === null || d.amount_manwon === undefined) {
+                            t1AllocAmount.textContent = "-";
+                            t1AllocReason.textContent = d.error || "추천 금액을 산출하지 못했습니다.";
+                            return;
+                        }
+                        t1AllocAmount.textContent = `${d.amount_manwon}만원`;
+                        t1AllocBar.style.width = `${d.amount_manwon}%`;
+                        t1AllocReason.textContent = d.reason || "";
+                    })
+                    .catch((err) => {
+                        t1AllocAmount.textContent = "-";
+                        t1AllocReason.textContent = `추천 계산 오류: ${err.message}`;
+                    });
+            }
 
             // 2단계: 전문가 프롬프트로 1차 종합 분석 요청
             showEl(t1Status, `2단계: ${stockData.name}(${stockData.code}) 수집 데이터를 바탕으로 AI 애널리스트 1차 분석을 생성 중입니다...`);

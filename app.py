@@ -223,6 +223,69 @@ def chat_analysis():
     }), 200
 
 
+@app.route("/api/allocate", methods=["POST"])
+def api_allocate():
+    """탭 1: 총 자산 100만 원 기준 해당 종목 추천 투자금(0~100만 원) 및 한 줄 이유 반환"""
+    import re
+
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or "").strip().upper()
+    stock_data = body.get("stock_data")
+
+    if not (isinstance(stock_data, dict) and stock_data.get("name")):
+        if not code:
+            return jsonify({"error": "종목코드를 입력해 주세요."}), 400
+        stock_data = collect_stock_data(code)
+        if not stock_data.get("name"):
+            return jsonify({"error": "종목 데이터 수집에 실패했습니다."}), 400
+
+    evidence_json = json.dumps(stock_data, ensure_ascii=False)
+    inputs = {
+        "code": stock_data["code"],
+        "stock_name": stock_data["name"],
+        "stock_data": evidence_json,
+    }
+    prompt = (
+        "당신은 데이터 기반 투자 애널리스트입니다.\n"
+        "아래 [수집된 종목 근거 JSON]만을 근거로, '총 자산이 100만 원이라면 이 종목에 얼마(0~100만 원 사이의 정수)를 투자할 것인가?'를 평가하세요.\n"
+        "- 'AI라서 판단할 수 없다'고 회피하지 마세요.\n"
+        "- 밸류에이션(PER/PBR/목표주가 또는 ETF 보수/괴리율), 실적 성장성, 52주 위치, 뉴스 모멘텀 및 리스크를 각각 점수화해 합산한 뒤, "
+        "30이나 50 같은 단순 10단위 어림수 대신 종목별 강약이 세밀하게 드러나는 **다양한 0~100 사이 정수**(예: 14, 27, 43, 68, 84 등)를 제시하세요.\n\n"
+        "반드시 아래 2줄 형식으로만 답변하세요:\n"
+        "RECOMMEND_MANWON: 0~100 사이의 정수\n"
+        "REASON: 데이터 기반 한 줄 핵심 이유 (50자 이내)\n\n"
+        f"[수집된 종목 근거 JSON]\n{evidence_json}"
+    )
+
+    logger.info(f"[ALLOCATE] 100만원 기준 AI 추천 투자금 요청 (code={stock_data['code']})")
+    dify_res, err = ask_analysis_bot(query=prompt, inputs=inputs, conversation_id=None)
+    if err:
+        return jsonify({"error": err}), 502
+
+    raw = (dify_res.get("answer") or "").strip()
+    m_amt = re.search(r"RECOMMEND_MANWON\s*[:：]\s*(\d{1,3})", raw, re.IGNORECASE)
+    if not m_amt:
+        m_amt = re.search(r"(\d{1,3})\s*만\s*원", raw)
+
+    amount = int(m_amt.group(1)) if m_amt else None
+    if amount is not None:
+        amount = max(0, min(100, amount))
+
+    m_reason = re.search(r"REASON\s*[:：]\s*(.+)", raw, re.IGNORECASE)
+    if m_reason:
+        reason = m_reason.group(1).strip()
+    else:
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip() and "RECOMMEND_MANWON" not in ln.upper()]
+        reason = lines[0] if lines else raw
+
+    return jsonify({
+        "code": stock_data["code"],
+        "name": stock_data["name"],
+        "amount_manwon": amount,
+        "reason": reason,
+    }), 200
+
+
 @app.route("/api/rebalance", methods=["POST"])
 def api_rebalance():
     """탭 2: Dify 없이 Python(FDR + 몬테카를로/효율적 프론티어 + 백테스트)으로 리밸런싱 비중 계산"""

@@ -79,6 +79,20 @@
                 <div id="t1-error" class="error-box hidden" style="margin-top: 14px; margin-bottom: 0;"></div>
             </div>
 
+            <!-- AI 100만원 가상 투자 추천 위젯 (검색창과 종목 대시보드 사이 최상단 배치) -->
+            <div id="t1-alloc-card" class="card alloc-card hidden">
+                <div class="alloc-number-wrap">
+                    <span id="t1-alloc-amount" class="alloc-amount">-</span>
+                    <span class="alloc-total">/ 100만원</span>
+                    <span class="badge-python" style="margin-left:auto;">AI 100만원 가상 투자 추천 <span id="t1-alloc-target"></span></span>
+                </div>
+                <div class="alloc-bar-track">
+                    <div id="t1-alloc-bar" class="alloc-bar-fill" style="width: 0%;"></div>
+                </div>
+                <p id="t1-alloc-reason" class="alloc-reason">AI가 수집된 데이터를 바탕으로 추천 투자금을 계산 중입니다...</p>
+                <div class="alloc-disclaimer">※ 수집 데이터 기반 가상 시뮬레이션이며 실제 투자 권유가 아닙니다.</div>
+            </div>
+
             <!-- 수집된 종목 데이터 대시보드 (/test 이상의 가독성) -->
             <div id="t1-stock-view" class="hidden">
                 <div class="card">
