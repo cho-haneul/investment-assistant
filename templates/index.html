@@ -42,7 +42,7 @@
                 <p class="panel-desc">종목코드를 입력하고 <strong>종목 조회 &amp; AI 분석</strong>을 누르면 시세·재무·뉴스를 수집해 표로 보여주고, 전문가 프롬프트로 1차 분석을 실행한 뒤 채팅을 이어갑니다.</p>
 
                 <form id="t1-fetch-form" class="search-form">
-                    <input type="text" id="t1-code-input" maxlength="6" placeholder="종목코드 6자리 입력 (예: 000660)" value="000660" required>
+                    <input type="text" id="t1-code-input" maxlength="12" placeholder="국내 6자리 또는 미국 티커 (예: 000660, 069500, AAPL, SPY)" value="000660" required>
                     <button type="submit" id="t1-fetch-btn">종목 조회 &amp; AI 분석</button>
                 </form>
 
@@ -50,7 +50,10 @@
                     <span>예시 종목:</span>
                     <button type="button" class="sample-btn t1-sample" data-code="000660">SK하이닉스 (000660)</button>
                     <button type="button" class="sample-btn t1-sample" data-code="005930">삼성전자 (005930)</button>
-                    <button type="button" class="sample-btn t1-sample" data-code="035420">NAVER (035420)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="069500">KODEX 200 (069500)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="AAPL">애플 (AAPL)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="NVDA">엔비디아 (NVDA)</button>
+                    <button type="button" class="sample-btn t1-sample" data-code="SPY">SPY ETF (SPY)</button>
                 </div>
 
                 <label class="toggle-label" style="margin-top: 12px; margin-bottom: 0;">
@@ -78,10 +81,10 @@
                     <div id="t1-snapshot-grid" class="snapshot-grid"></div>
                 </div>
 
-                <div class="card">
+                <div id="t1-financials-card" class="card">
                     <div class="section-title-row">
                         <h3>연간 재무실적</h3>
-                        <span class="unit-note">단위: 억원 / % &nbsp;|&nbsp; <span class="badge-consensus">추정(E)</span> 컨센서스 구분</span>
+                        <span class="unit-note"><span id="t1-finance-unit-note">단위: 억원 / %</span> &nbsp;|&nbsp; <span class="badge-consensus">추정(E)</span> 컨센서스 구분</span>
                     </div>
                     <div class="table-wrap">
                         <table class="finance-table">
@@ -99,6 +102,15 @@
                             <tbody id="t1-financials-tbody"></tbody>
                         </table>
                     </div>
+                </div>
+
+                <div id="t1-etf-card" class="card hidden">
+                    <div class="section-title-row">
+                        <h3>ETF 운용 개요 &amp; 기간별 수익률</h3>
+                        <span id="t1-etf-meta" class="unit-note">-</span>
+                    </div>
+                    <div id="t1-etf-returns-grid" class="snapshot-grid" style="margin-bottom: 12px;"></div>
+                    <p id="t1-etf-desc" class="panel-desc" style="margin-bottom: 0; line-height: 1.6;"></p>
                 </div>
 
                 <div class="card">
@@ -149,6 +161,8 @@
                     <span>추천 조합:</span>
                     <button type="button" class="sample-btn t2-preset" data-codes="005930, 000660, 069500">삼성전자 + SK하이닉스 + KODEX 200</button>
                     <button type="button" class="sample-btn t2-preset" data-codes="005930, 035420, 005380, 069500">반도체 + 플랫폼 + 자동차 + 지수ETF</button>
+                    <button type="button" class="sample-btn t2-preset" data-codes="AAPL, NVDA, MSFT, SPY">미국 빅테크 + S&amp;P500 (AAPL, NVDA, MSFT, SPY)</button>
+                    <button type="button" class="sample-btn t2-preset" data-codes="SPY, TLT, GLD">글로벌 자산배분 (SPY, TLT, GLD)</button>
                 </div>
 
                 <div id="t2-status" class="status-box hidden"></div>
@@ -182,13 +196,13 @@
                         <table class="finance-table">
                             <thead>
                                 <tr>
-                                    <th>종목코드</th>
+                                    <th>종목명 (코드)</th>
                                     <th>최적 비중</th>
                                     <th>최소변동성 비중</th>
                                     <th>동일 비중</th>
                                     <th>연 기대수익률</th>
                                     <th>연 변동성</th>
-                                    <th>MDD</th>
+                                    <th>MDD (최대낙폭)</th>
                                 </tr>
                             </thead>
                             <tbody id="t2-assets-tbody"></tbody>
@@ -208,7 +222,7 @@
                 <p class="panel-desc">FinanceDataReader로 이동평균(MA5/20/60), RSI(14), MACD, 볼린저밴드를 계산해 차트로 그리고, 채팅 시 계산된 숫자를 숨겨서 AI에게 전달합니다.</p>
 
                 <form id="t3-form" class="search-form">
-                    <input type="text" id="t3-code-input" maxlength="6" value="005930" placeholder="종목코드 6자리 입력 (예: 005930)" required>
+                    <input type="text" id="t3-code-input" maxlength="12" value="005930" placeholder="국내 6자리 또는 미국 티커 (예: 005930, AAPL, QQQ)" required>
                     <button type="submit" id="t3-load-btn">차트 &amp; 지표 불러오기</button>
                 </form>
 
@@ -216,7 +230,10 @@
                     <span>예시 종목:</span>
                     <button type="button" class="sample-btn t3-sample" data-code="005930">삼성전자 (005930)</button>
                     <button type="button" class="sample-btn t3-sample" data-code="000660">SK하이닉스 (000660)</button>
-                    <button type="button" class="sample-btn t3-sample" data-code="035420">NAVER (035420)</button>
+                    <button type="button" class="sample-btn t3-sample" data-code="069500">KODEX 200 (069500)</button>
+                    <button type="button" class="sample-btn t3-sample" data-code="AAPL">애플 (AAPL)</button>
+                    <button type="button" class="sample-btn t3-sample" data-code="TSLA">테슬라 (TSLA)</button>
+                    <button type="button" class="sample-btn t3-sample" data-code="QQQ">QQQ (QQQ)</button>
                 </div>
 
                 <div id="t3-status" class="status-box hidden"></div>
@@ -265,6 +282,10 @@
                 </div>
             </div>
         </section>
+
+        <footer class="app-footer">
+            본 서비스의 시세·재무·ETF 정보는 네이버 금융 및 FinanceDataReader 데이터를 기반으로 제공되며, AI 분석 및 퀀트 시뮬레이션 결과는 투자 학습·참고용일 뿐 실제 투자 권유가 아닙니다.
+        </footer>
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>

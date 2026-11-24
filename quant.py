@@ -3,23 +3,25 @@ import logging
 import FinanceDataReader as fdr
 import numpy as np
 import pandas as pd
+from collector import fetch_stock_name, is_us_ticker, validate_code
 
 logger = logging.getLogger(__name__)
 
 
 def _clean_codes(codes):
-    """종목코드 리스트를 정제하고 중복을 제거합니다."""
+    """종목코드 리스트(국내 6자리 또는 미국 티커)를 정제하고 중복을 제거합니다."""
     cleaned = []
     seen = set()
     for c in codes:
-        code = str(c).strip()
-        if not code:
+        raw = str(c).strip()
+        if not raw:
             continue
-        if len(code) != 6 or not code.isdigit():
-            return None, f"종목코드는 6자리 숫자여야 합니다. (입력값: '{c}')"
-        if code not in seen:
-            seen.add(code)
-            cleaned.append(code)
+        ok, validated = validate_code(raw)
+        if not ok:
+            return None, validated
+        if validated not in seen:
+            seen.add(validated)
+            cleaned.append(validated)
     return cleaned, None
 
 
@@ -78,8 +80,9 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
     mean_returns = returns.mean().values * 252.0
     cov_matrix = returns.cov().values * 252.0
 
-    # 몬테카를로 시뮬레이션
-    weights_matrix = np.random.dirichlet(np.ones(n_assets), size=num_portfolios)
+    # 몬테카를로 시뮬레이션 (고정 시드로 동일 입력에 대해 일관된 결과 보장)
+    rng = np.random.default_rng(42)
+    weights_matrix = rng.dirichlet(np.ones(n_assets), size=num_portfolios)
     port_returns = weights_matrix @ mean_returns
     port_vols = np.sqrt(np.einsum("ij,jk,ik->i", weights_matrix, cov_matrix, weights_matrix))
     sharpe_ratios = np.where(port_vols > 0, (port_returns - risk_free_rate) / port_vols, 0.0)
@@ -108,6 +111,7 @@ def calculate_rebalancing(codes, num_portfolios=2500, risk_free_rate=0.035):
         asset_vol = float(np.sqrt(cov_matrix[i, i]) * 100.0)
         assets_summary.append({
             "code": code,
+            "name": fetch_stock_name(code),
             "optimal_weight_pct": round(float(best_weights[i] * 100.0), 2),
             "min_vol_weight_pct": round(float(min_vol_weights[i] * 100.0), 2),
             "equal_weight_pct": round(float(equal_weights[i] * 100.0), 2),
@@ -170,9 +174,12 @@ def calculate_technical_indicators(code, days=365, chart_points=120):
     FinanceDataReader 최근 주가 데이터를 바탕으로
     이동평균(MA5/20/60), RSI(14), MACD(12,26,9), 볼린저밴드(20,2)를 계산합니다.
     """
-    code_str = str(code or "").strip()
-    if len(code_str) != 6 or not code_str.isdigit():
-        return None, f"종목코드는 6자리 숫자여야 합니다. (입력값: '{code}')"
+    ok, code_str = validate_code(code)
+    if not ok:
+        return None, code_str
+
+    is_us = is_us_ticker(code_str)
+    price_digits = 2 if is_us else 0
 
     end_date = dt.date.today()
     start_date = end_date - dt.timedelta(days=days)
@@ -226,7 +233,7 @@ def calculate_technical_indicators(code, days=365, chart_points=120):
         date_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
         series.append({
             "date": date_str,
-            "close": _safe_round(row["Close"], 0),
+            "close": _safe_round(row["Close"], price_digits),
             "volume": int(row["Volume"]) if "Volume" in row and not pd.isna(row["Volume"]) else 0,
             "ma5": _safe_round(row["ma5"], 2),
             "ma20": _safe_round(row["ma20"], 2),
@@ -246,6 +253,8 @@ def calculate_technical_indicators(code, days=365, chart_points=120):
 
     return {
         "code": code_str,
+        "name": fetch_stock_name(code_str),
+        "currency": "USD" if is_us else "KRW",
         "latest": latest,
         "series": series,
     }, None

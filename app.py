@@ -76,7 +76,7 @@ def fetch_stock():
 def chat_analysis():
     """탭 1: 종목 데이터(네이버+Serper)를 수집해 전문가 프롬프트로 Dify 종목분석 챗봇에 전달"""
     body = request.get_json(silent=True) or {}
-    code = str(body.get("code") or "").strip()
+    code = str(body.get("code") or "").strip().upper()
     query = str(body.get("query") or "").strip()
     conversation_id = body.get("conversation_id") or None
     use_tools = body.get("use_tools", True)
@@ -84,15 +84,27 @@ def chat_analysis():
     mode = body.get("mode", "chat")  # "init" (초기 전문가 종합분석) or "chat" (후속 대화)
 
     if mode == "init" and not query:
-        query = (
-            "수집된 최신 종목 데이터(시세·밸류에이션·연간 재무실적·뉴스)만을 근거로 "
-            "전문 애널리스트 관점에서 종목 심층 분석 리포트를 작성해 주세요.\n"
-            "다음 4개 항목으로 구조화해 주세요:\n"
-            "1. **현재 주가 및 밸류에이션** (PER, PBR, 52주 고저 대비 위치, 시가총액)\n"
-            "2. **재무 실적 추이** (매출·영업이익·순이익·영업이익률·ROE·부채비율, 확정치와 추정(E) 구분)\n"
-            "3. **최신 뉴스 핵심 이슈 및 모멘텀**\n"
-            "4. **종합 의견 (긍정 요인 vs 리스크 요인)**"
-        )
+        is_cached_etf = isinstance(cached_stock_data, dict) and cached_stock_data.get("asset_type") == "etf"
+        if is_cached_etf:
+            query = (
+                "수집된 최신 ETF 데이터(현재가·NAV·괴리율·총보수·기간별 수익률·운용정보·뉴스)만을 근거로 "
+                "전문 ETF 애널리스트 관점에서 심층 분석 리포트를 작성해 주세요.\n"
+                "다음 4개 항목으로 구조화해 주세요:\n"
+                "1. **현재가 및 ETF 기본 지표** (현재가, NAV, 괴리율, 52주 고저 대비 위치, 시가총액·순자산총액)\n"
+                "2. **운용 구조 및 수익률 추이** (기초지수, 운용사, 총보수, 최근 1개월·3개월·6개월·1년 수익률, 분배금 수익률)\n"
+                "3. **최신 뉴스 및 기초지수·시장 모멘텀**\n"
+                "4. **종합 의견 (장점·투자 포인트 vs 리스크 요인)**"
+            )
+        else:
+            query = (
+                "수집된 최신 종목 데이터(시세·밸류에이션·컨센서스·연간 재무실적·뉴스)만을 근거로 "
+                "전문 애널리스트 관점에서 종목 심층 분석 리포트를 작성해 주세요.\n"
+                "다음 4개 항목으로 구조화해 주세요:\n"
+                "1. **현재 주가 및 밸류에이션** (PER, 추정PER, PBR, EPS, BPS, 52주 고저 대비 위치, 시가총액, 증권가 목표주가)\n"
+                "2. **재무 실적 추이** (매출·영업이익·순이익·영업이익률·ROE·부채비율, 확정치와 추정(E) 구분)\n"
+                "3. **최신 뉴스 핵심 이슈 및 모멘텀**\n"
+                "4. **종합 의견 (긍정 요인 vs 리스크 요인)**"
+            )
 
     if not query:
         return jsonify({"error": "질문을 입력해 주세요."}), 400
@@ -102,11 +114,18 @@ def chat_analysis():
     inputs = {}
 
     if use_tools:
-        if isinstance(cached_stock_data, dict) and cached_stock_data.get("name"):
+        cache_matches_code = (
+            isinstance(cached_stock_data, dict)
+            and cached_stock_data.get("name")
+            and (not code or cached_stock_data.get("code") == code)
+        )
+        if cache_matches_code:
             stock_data = cached_stock_data
         else:
             if not code:
-                return jsonify({"error": "도구(데이터 수집) 사용 시 6자리 종목코드를 입력해 주세요."}), 400
+                return jsonify({"error": "도구(데이터 수집) 사용 시 종목코드(국내 6자리 또는 미국 티커 예: AAPL)를 입력해 주세요."}), 400
+            if isinstance(cached_stock_data, dict) and cached_stock_data.get("code") != code:
+                conversation_id = None
             logger.info(f"[CHAT-ANALYSIS] 종목 데이터 수집 후 Dify 호출 (code={code})")
             stock_data = collect_stock_data(code)
             if not stock_data.get("name"):
@@ -130,16 +149,33 @@ def chat_analysis():
             "마지막에 한 줄로 '※ 본 답변은 제공된 데이터 기반의 가상 시뮬레이션이며 실제 투자 권유가 아닙니다.'라고 덧붙이세요.\n\n"
         )
 
+        is_etf = stock_data.get("asset_type") == "etf"
+        is_us = stock_data.get("market_region") == "US"
+        market_label = "미국 주식·ETF" if is_us else "한국 주식·ETF"
+        currency_note = "통화는 USD(달러), 재무제표 금액 단위는 '백만 USD'입니다. 원화(원/억원)로 착각하지 마세요." if is_us else "통화는 원(KRW), 재무제표 금액 단위는 '억원'입니다."
+
         if not conversation_id or mode == "init":
-            dify_query = (
-                "당신은 한국 주식시장 전문 애널리스트입니다.\n"
-                "아래 [수집된 종목 근거 JSON]에 포함된 실제 숫자와 뉴스만을 근거로 답변하세요. "
-                "JSON에 없는 수치나 사실은 절대 추측해 지어내지 마세요. "
-                "실적 중 `is_consensus: true` 항목은 반드시 '추정(E)'으로 구분해 설명하세요.\n\n"
-                f"{hypothetical_rule}"
-                f"[수집된 종목 근거 JSON]\n{evidence_json}\n\n"
-                f"[요청 사항]\n{query}"
-            )
+            if is_etf:
+                dify_query = (
+                    f"당신은 {market_label} 시장 전문 애널리스트입니다.\n"
+                    f"이 종목은 일반 개별 기업이 아닌 ETF(상장지수펀드)입니다. {currency_note}\n"
+                    "아래 [수집된 종목 근거 JSON]에 포함된 실제 숫자(현재가, 시가총액, 52주 고저, NAV/괴리율/총보수/수익률 등 제공된 항목)와 뉴스만을 근거로 답변하세요. "
+                    "JSON에 없는 수치나 사실은 절대 추측해 지어내지 마세요.\n\n"
+                    f"{hypothetical_rule}"
+                    f"[수집된 종목 근거 JSON]\n{evidence_json}\n\n"
+                    f"[요청 사항]\n{query}"
+                )
+            else:
+                dify_query = (
+                    f"당신은 {market_label} 시장 전문 애널리스트입니다.\n"
+                    f"{currency_note}\n"
+                    "아래 [수집된 종목 근거 JSON]에 포함된 실제 숫자와 뉴스만을 근거로 답변하세요. "
+                    "JSON에 없는 수치나 사실은 절대 추측해 지어내지 마세요. "
+                    "실적 중 `is_consensus: true` 항목은 반드시 '추정(E)'으로 구분해 설명하세요.\n\n"
+                    f"{hypothetical_rule}"
+                    f"[수집된 종목 근거 JSON]\n{evidence_json}\n\n"
+                    f"[요청 사항]\n{query}"
+                )
         else:
             dify_query = (
                 f"[현재 분석 대상 종목: {stock_data['name']} ({stock_data['code']})]\n"
@@ -195,7 +231,7 @@ def api_rebalance():
 def api_technical():
     """탭 3: FDR 기반 기술지표(MA/RSI/MACD/볼린저밴드) 및 차트 데이터 반환"""
     body = request.get_json(silent=True) or {}
-    code = str(body.get("code") or "").strip()
+    code = str(body.get("code") or "").strip().upper()
     logger.info(f"[TECHNICAL] 기술지표 계산 요청 수신 (code={code})")
 
     result, err = calculate_technical_indicators(code)
@@ -209,7 +245,8 @@ def api_technical():
 def chat_technical():
     """탭 3: 계산된 기술지표 숫자를 숨김 주입하여 Dify 지표해석기 챗봇 호출"""
     body = request.get_json(silent=True) or {}
-    code = str(body.get("code") or "").strip()
+    code = str(body.get("code") or "").strip().upper()
+    stock_name = str(body.get("stock_name") or "").strip()
     query = str(body.get("query") or "").strip()
     conversation_id = body.get("conversation_id") or None
     latest = body.get("indicators")
@@ -224,16 +261,20 @@ def chat_technical():
         if err:
             return jsonify({"error": err}), 400
         latest = tech_res.get("latest", {})
+        if not stock_name:
+            stock_name = tech_res.get("name") or ""
 
+    display_target = f"{stock_name} ({code})" if stock_name else code
     indicators_json = json.dumps(latest, ensure_ascii=False)
     inputs = {
         "code": code,
+        "stock_name": stock_name or code,
         "indicators": indicators_json,
     }
     dify_query = (
-        f"[계산된 최신 기술지표 숫자 (종목코드: {code})]\n{indicators_json}\n\n"
+        f"[계산된 최신 기술지표 숫자 (대상: {display_target})]\n{indicators_json}\n\n"
         f"[사용자 질문]\n{query}\n\n"
-        "※ 반드시 위 [계산된 최신 기술지표 숫자]만을 근거로 초보자도 이해하기 쉽게 설명해 주세요."
+        "※ 반드시 위 [계산된 최신 기술지표 숫자]만을 근거로 주식을 잘 모르는 초보자도 이해하기 쉽게 설명해 주세요."
     )
 
     logger.info(f"[CHAT-TECH] 기술지표 숫자 주입 후 Dify 지표해석기 호출 (code={code})")
