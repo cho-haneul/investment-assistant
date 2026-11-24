@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import requests
 from dotenv import load_dotenv
 
@@ -60,28 +61,60 @@ def send_chat_message(
         f"[DIFY] 챗봇 API 요청 시작 (url={url}, has_conv={bool(conversation_id)}, input_keys={list((inputs or {}).keys())})"
     )
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        if not response.ok:
-            err_detail = response.text[:300]
-            try:
-                err_json = response.json()
-                err_detail = err_json.get("message") or err_json.get("code") or err_detail
-            except ValueError:
-                pass
-            logger.error(f"[DIFY] API 오류 응답 (HTTP {response.status_code}): {err_detail}")
-            return None, f"Dify API 호출 실패 (HTTP {response.status_code}): {err_detail}"
+    max_attempts = 3
+    data = None
+    last_err = None
 
-        data = response.json()
-    except requests.exceptions.Timeout:
-        logger.error("[DIFY] API 응답 시간 초과 (Timeout)")
-        return None, "Dify 챗봇 응답 시간이 초과되었습니다 (Timeout)."
-    except requests.exceptions.RequestException as e:
-        logger.error(f"[DIFY] 네트워크 요청 실패: {e}")
-        return None, f"Dify 서버 연결 실패: {str(e)}"
-    except ValueError:
-        logger.error("[DIFY] 응답 JSON 파싱 실패")
-        return None, "Dify 응답(JSON) 파싱에 실패했습니다."
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            if not response.ok:
+                err_detail = response.text[:300]
+                try:
+                    err_json = response.json()
+                    err_detail = err_json.get("message") or err_json.get("code") or err_detail
+                except ValueError:
+                    pass
+
+                lower_err = err_detail.lower()
+                is_transient = (
+                    response.status_code in (429, 502, 503, 504)
+                    or "high demand" in lower_err
+                    or "temporary" in lower_err
+                    or "overloaded" in lower_err
+                    or "rate limit" in lower_err
+                )
+                logger.warning(f"[DIFY] API 오류 (시도 {attempt}/{max_attempts}, HTTP {response.status_code}): {err_detail}")
+
+                if is_transient and attempt < max_attempts:
+                    time.sleep(1.5 * attempt)
+                    continue
+
+                if "high demand" in lower_err or "overloaded" in lower_err:
+                    return None, (
+                        "현재 Dify에 연결된 Gemini AI 모델에 일시적으로 요청이 몰려 응답이 지연되고 있습니다. "
+                        "잠시 후 다시 시도하거나, Dify 스튜디오에서 다른 모델(예: Gemini Flash 등)로 변경해 보세요."
+                    )
+                return None, f"Dify API 호출 실패 (HTTP {response.status_code}): {err_detail}"
+
+            data = response.json()
+            break
+        except requests.exceptions.Timeout:
+            logger.warning(f"[DIFY] API 응답 시간 초과 (시도 {attempt}/{max_attempts})")
+            last_err = "Dify 챗봇 응답 시간이 초과되었습니다 (Timeout)."
+            if attempt < max_attempts:
+                time.sleep(1.5)
+                continue
+            return None, last_err
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[DIFY] 네트워크 요청 실패: {e}")
+            return None, f"Dify 서버 연결 실패: {str(e)}"
+        except ValueError:
+            logger.error("[DIFY] 응답 JSON 파싱 실패")
+            return None, "Dify 응답(JSON) 파싱에 실패했습니다."
+
+    if data is None:
+        return None, last_err or "Dify 응답을 받지 못했습니다."
 
     result = {
         "answer": data.get("answer", ""),
