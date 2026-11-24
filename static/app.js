@@ -283,6 +283,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1SnapshotGridEl = document.getElementById("t1-snapshot-grid");
     const t1GaugeEl = document.getElementById("t1-52w-gauge");
     const t1PriceCardEl = document.getElementById("t1-price-card");
+    const t1PriceCurrencyNoteEl = document.getElementById("t1-price-currency-note");
     const t1PriceRangeChangeEl = document.getElementById("t1-price-range-change");
     const t1ChartsRowEl = document.getElementById("t1-charts-row");
     const t1Chart1TitleEl = document.getElementById("t1-chart-1-title");
@@ -666,6 +667,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const fillTop = isUp ? "rgba(220, 38, 38, 0.22)" : "rgba(37, 99, 235, 0.22)";
             const fillBottom = isUp ? "rgba(220, 38, 38, 0.0)" : "rgba(37, 99, 235, 0.0)";
 
+            if (t1PriceCurrencyNoteEl) {
+                t1PriceCurrencyNoteEl.textContent = data.currency === "USD" ? "(단위: 달러 USD · $)" : "(단위: 원화 KRW · 원)";
+            }
+
             if (t1PriceRangeChangeEl) {
                 t1PriceRangeChangeEl.className = `price-change ${isUp ? "up" : "down"}`;
                 t1PriceRangeChangeEl.textContent = pct !== null
@@ -711,7 +716,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     scales: {
                         x: { grid: { display: false }, ticks: { maxTicksLimit: 7 } },
-                        y: { grid: { color: "rgba(148, 163, 184, 0.18)" } },
+                        y: {
+                            grid: { color: "rgba(148, 163, 184, 0.18)" },
+                            ticks: {
+                                callback: (value) => formatPrice(value, data.currency),
+                            },
+                        },
                     },
                 },
             });
