@@ -1,5 +1,9 @@
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("[INIT] 나의 투자도우미 3탭 프론트엔드 초기화 완료");
+    console.log("[INIT] 나의 투자도우미 4탭 프론트엔드 초기화 완료");
+    if (window.Chart) {
+        window.Chart.defaults.color = "#cbd5e1";
+        window.Chart.defaults.borderColor = "rgba(255, 255, 255, 0.08)";
+    }
 
     // ==================== 공통 유틸 ====================
     function showEl(el, text = null) {
