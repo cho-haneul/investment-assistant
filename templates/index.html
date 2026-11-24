@@ -35,6 +35,14 @@
             </button>
         </nav>
 
+        <!-- 공통 관심종목 즐겨찾기 바 -->
+        <div id="watchlist-bar" class="watchlist-bar">
+            <span class="watchlist-label">★ 내 관심종목:</span>
+            <div id="watchlist-items" class="watchlist-items">
+                <span class="unit-note">아직 저장된 관심종목이 없습니다. 종목 조회 후 ☆ 즐겨찾기를 눌러보세요!</span>
+            </div>
+        </div>
+
         <!-- ==================== 탭 1: 종목 심층분석 채팅 ==================== -->
         <section id="tab-analysis" class="tab-panel active">
             <div class="card">
@@ -79,6 +87,7 @@
                             <div class="stock-title-row">
                                 <h2 id="t1-stock-name">-</h2>
                                 <span id="t1-asset-badge" class="asset-badge hidden">-</span>
+                                <button type="button" id="t1-fav-btn" class="fav-toggle-btn hidden" title="관심종목 즐겨찾기">☆ 즐겨찾기</button>
                             </div>
                             <span id="t1-stock-meta" class="stock-meta">-</span>
                         </div>
@@ -236,6 +245,12 @@
                     <button type="button" class="sample-btn t2-preset" data-codes="SPY, TLT, IEF, GLD">올웨더 맛보기 (SPY, TLT, IEF, GLD)</button>
                 </div>
 
+                <div class="saved-port-bar">
+                    <input type="text" id="t2-save-name" placeholder="포트폴리오 이름 (예: 내 연금계좌)" maxlength="24">
+                    <button type="button" id="t2-save-btn" class="secondary-btn">현재 조합·수량 저장</button>
+                    <div id="t2-saved-list" class="saved-port-list"></div>
+                </div>
+
                 <div id="t2-status" class="status-box hidden"></div>
                 <div id="t2-error" class="error-box hidden"></div>
             </div>
@@ -354,7 +369,10 @@
 
             <div id="t3-result" class="hidden">
                 <div class="card">
-                    <h3 id="t3-chart-title">최신 기술지표 요약</h3>
+                    <div class="section-title-row">
+                        <h3 id="t3-chart-title">최신 기술지표 요약</h3>
+                        <button type="button" id="t3-fav-btn" class="fav-toggle-btn hidden">☆ 즐겨찾기</button>
+                    </div>
                     <div id="t3-latest-grid" class="snapshot-grid"></div>
                 </div>
 
@@ -428,7 +446,10 @@
                 <div class="card">
                     <div class="section-title-row">
                         <h3 id="t4-company-title">기업 공식 개황</h3>
-                        <a id="t4-homepage-link" href="#" target="_blank" rel="noopener noreferrer" class="unit-note hidden">공식 홈페이지 ↗</a>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <button type="button" id="t4-fav-btn" class="fav-toggle-btn hidden">☆ 즐겨찾기</button>
+                            <a id="t4-homepage-link" href="#" target="_blank" rel="noopener noreferrer" class="unit-note hidden">공식 홈페이지 ↗</a>
+                        </div>
                     </div>
                     <div id="t4-company-grid" class="snapshot-grid"></div>
                 </div>

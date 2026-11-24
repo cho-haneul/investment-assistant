@@ -861,3 +861,116 @@ body {
     .stock-header { flex-direction: column; }
     .price-box { text-align: left; }
 }
+.watchlist-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    padding: 10px 16px;
+    margin-bottom: 18px;
+}
+
+.watchlist-label {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--green-deep);
+    white-space: nowrap;
+}
+
+.watchlist-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.fav-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-tint);
+    border: 1px solid #a7f3d0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #065f46;
+}
+
+.fav-chip-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+}
+
+.fav-chip-btn:hover {
+    text-decoration: underline;
+}
+
+.fav-chip-del {
+    background: none;
+    border: none;
+    color: #6c8277;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.fav-chip-del:hover {
+    color: #dc2626;
+}
+
+.fav-toggle-btn {
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: #ffffff;
+    color: var(--text-sub);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.fav-toggle-btn:hover {
+    border-color: var(--green-primary);
+    color: var(--green-deep);
+}
+
+.fav-toggle-btn.active {
+    background: #fef3c7;
+    border-color: #f59e0b;
+    color: #92400e;
+}
+
+.saved-port-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border-soft);
+}
+
+.saved-port-bar input {
+    padding: 6px 10px;
+    font-size: 0.84rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    width: 210px;
+}
+
+.saved-port-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}

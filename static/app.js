@@ -119,7 +119,122 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ==================== 3탭 전환 ====================
+    // ==================== 공통 관심종목 즐겨찾기 (localStorage) ====================
+    const WATCHLIST_KEY = "mia_watchlist_v1";
+    const PORTFOLIOS_KEY = "mia_portfolios_v1";
+    const watchlistItemsEl = document.getElementById("watchlist-items");
+    const t1FavBtn = document.getElementById("t1-fav-btn");
+    const t3FavBtn = document.getElementById("t3-fav-btn");
+    const t4FavBtn = document.getElementById("t4-fav-btn");
+
+    function loadWatchlist() {
+        try {
+            return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || "[]");
+        } catch {
+            return [];
+        }
+    }
+
+    function saveWatchlist(list) {
+        localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+    }
+
+    function isFavorite(code) {
+        return loadWatchlist().some((x) => x.code === code);
+    }
+
+    function syncFavButton(btn, code, name) {
+        if (!btn || !code) return;
+        const active = isFavorite(code);
+        btn.classList.toggle("active", active);
+        btn.textContent = active ? "★ 즐겨찾기됨" : "☆ 즐겨찾기";
+        btn.dataset.code = code;
+        btn.dataset.name = name || code;
+        showEl(btn);
+    }
+
+    function toggleFavorite(code, name) {
+        if (!code) return;
+        const list = loadWatchlist();
+        const idx = list.findIndex((x) => x.code === code);
+        if (idx >= 0) {
+            list.splice(idx, 1);
+        } else {
+            list.unshift({ code, name: name || code });
+        }
+        saveWatchlist(list);
+        renderWatchlistBar();
+        if (t1FavBtn && t1FavBtn.dataset.code === code) syncFavButton(t1FavBtn, code, name);
+        if (t3FavBtn && t3FavBtn.dataset.code === code) syncFavButton(t3FavBtn, code, name);
+        if (t4FavBtn && t4FavBtn.dataset.code === code) syncFavButton(t4FavBtn, code, name);
+    }
+
+    function renderWatchlistBar() {
+        if (!watchlistItemsEl) return;
+        const list = loadWatchlist();
+        watchlistItemsEl.innerHTML = "";
+        if (list.length === 0) {
+            const span = document.createElement("span");
+            span.className = "unit-note";
+            span.textContent = "아직 저장된 관심종목이 없습니다. 종목 조회 후 ☆ 즐겨찾기를 눌러보세요!";
+            watchlistItemsEl.appendChild(span);
+            return;
+        }
+        list.forEach((item) => {
+            const chip = document.createElement("span");
+            chip.className = "fav-chip";
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "fav-chip-btn";
+            btn.textContent = `${item.name} (${item.code})`;
+            btn.addEventListener("click", () => {
+                const activeTab = document.querySelector(".tab-btn.active")?.dataset.tab;
+                if (activeTab === "tab-technical") {
+                    t3CodeInput.value = item.code;
+                    loadTechnicalData(item.code);
+                } else if (activeTab === "tab-dart") {
+                    if (/^\d{6}$/.test(item.code)) {
+                        t4CodeInput.value = item.code;
+                        runTab4DartAndAnalyze(item.code);
+                    } else {
+                        showEl(t4Error, "DART 공시는 국내 상장 6자리 종목만 조회할 수 있습니다.");
+                    }
+                } else if (activeTab === "tab-rebalance") {
+                    const cur = t2CodesInput.value.split(",").map((s) => s.trim()).filter(Boolean);
+                    if (!cur.includes(item.code)) {
+                        cur.push(item.code);
+                        t2CodesInput.value = cur.join(", ");
+                    }
+                } else {
+                    t1CodeInput.value = item.code;
+                    runTab1FetchAndAnalyze(item.code);
+                }
+            });
+
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "fav-chip-del";
+            del.title = "삭제";
+            del.textContent = "×";
+            del.addEventListener("click", () => toggleFavorite(item.code, item.name));
+
+            chip.appendChild(btn);
+            chip.appendChild(del);
+            watchlistItemsEl.appendChild(chip);
+        });
+    }
+
+    [t1FavBtn, t3FavBtn, t4FavBtn].forEach((btn) => {
+        if (!btn) return;
+        btn.addEventListener("click", () => {
+            toggleFavorite(btn.dataset.code, btn.dataset.name);
+        });
+    });
+
+    renderWatchlistBar();
+
+    // ==================== 4탭 전환 ====================
     const tabButtons = document.querySelectorAll(".tab-btn");
     const tabPanels = document.querySelectorAll(".tab-panel");
 
@@ -357,6 +472,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const etf = data.etf_info || {};
 
         t1StockNameEl.textContent = `${data.name} (${data.code})`;
+        syncFavButton(t1FavBtn, data.code, data.name);
         if (t1AssetBadgeEl) {
             t1AssetBadgeEl.className = "asset-badge";
             if (isEtf) {
@@ -662,6 +778,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let t2FrontierChart = null;
     let t2EquityChart = null;
     let t2DdChart = null;
+    let t2HoldingsMap = {};
 
     const t2Form = document.getElementById("t2-form");
     const t2CodesInput = document.getElementById("t2-codes-input");
@@ -672,7 +789,83 @@ document.addEventListener("DOMContentLoaded", () => {
     const t2StrategyInput = document.getElementById("t2-strategy");
     const t2BenchmarkInput = document.getElementById("t2-benchmark");
     const t2CapitalInput = document.getElementById("t2-capital");
+    const t2SaveNameInput = document.getElementById("t2-save-name");
+    const t2SaveBtn = document.getElementById("t2-save-btn");
+    const t2SavedListEl = document.getElementById("t2-saved-list");
     const t2CalcBtn = document.getElementById("t2-calc-btn");
+
+    function loadSavedPortfolios() {
+        try {
+            return JSON.parse(localStorage.getItem(PORTFOLIOS_KEY) || "[]");
+        } catch {
+            return [];
+        }
+    }
+
+    function savePortfolios(list) {
+        localStorage.setItem(PORTFOLIOS_KEY, JSON.stringify(list));
+    }
+
+    function renderSavedPortfolios() {
+        if (!t2SavedListEl) return;
+        const list = loadSavedPortfolios();
+        t2SavedListEl.innerHTML = "";
+        list.forEach((p, idx) => {
+            const chip = document.createElement("span");
+            chip.className = "fav-chip";
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "fav-chip-btn";
+            btn.textContent = p.name;
+            btn.addEventListener("click", () => {
+                t2CodesInput.value = p.codes || "";
+                if (t2YearsInput && p.years) t2YearsInput.value = String(p.years);
+                if (t2FreqInput && p.freq) t2FreqInput.value = p.freq;
+                if (t2StrategyInput && p.strategy) t2StrategyInput.value = p.strategy;
+                if (t2BenchmarkInput && p.benchmark) t2BenchmarkInput.value = p.benchmark;
+                if (t2CapitalInput && p.capital) t2CapitalInput.value = String(p.capital);
+                t2HoldingsMap = p.holdings && typeof p.holdings === "object" ? { ...p.holdings } : {};
+                t2Form.requestSubmit();
+            });
+            const del = document.createElement("button");
+            del.type = "button";
+            del.className = "fav-chip-del";
+            del.textContent = "×";
+            del.title = "삭제";
+            del.addEventListener("click", () => {
+                const next = loadSavedPortfolios();
+                next.splice(idx, 1);
+                savePortfolios(next);
+                renderSavedPortfolios();
+            });
+            chip.appendChild(btn);
+            chip.appendChild(del);
+            t2SavedListEl.appendChild(chip);
+        });
+    }
+
+    if (t2SaveBtn) {
+        t2SaveBtn.addEventListener("click", () => {
+            const name = (t2SaveNameInput?.value || "").trim() || `포트폴리오 ${loadSavedPortfolios().length + 1}`;
+            const entry = {
+                name,
+                codes: t2CodesInput.value.trim(),
+                years: t2YearsInput ? t2YearsInput.value : "1",
+                freq: t2FreqInput ? t2FreqInput.value : "none",
+                strategy: t2StrategyInput ? t2StrategyInput.value : "static",
+                benchmark: t2BenchmarkInput ? t2BenchmarkInput.value : "069500",
+                capital: t2CapitalInput ? t2CapitalInput.value : "10000000",
+                holdings: { ...t2HoldingsMap },
+            };
+            const list = loadSavedPortfolios().filter((x) => x.name !== name);
+            list.unshift(entry);
+            savePortfolios(list);
+            if (t2SaveNameInput) t2SaveNameInput.value = "";
+            renderSavedPortfolios();
+        });
+    }
+
+    renderSavedPortfolios();
     const t2Status = document.getElementById("t2-status");
     const t2Error = document.getElementById("t2-error");
     const t2Result = document.getElementById("t2-result");
@@ -804,7 +997,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const qtyInput = document.createElement("input");
             qtyInput.type = "number";
             qtyInput.min = "0";
-            qtyInput.value = "0";
+            qtyInput.value = String(t2HoldingsMap[a.code] ?? 0);
             qtyInput.className = "qty-input";
             curQtyTd.appendChild(qtyInput);
             tr.appendChild(curQtyTd);
@@ -812,6 +1005,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const diffTd = document.createElement("td");
             const updateDiff = () => {
                 const curQty = Math.max(0, parseInt(qtyInput.value || "0", 10) || 0);
+                t2HoldingsMap[a.code] = curQty;
                 const diff = targetShares - curQty;
                 diffTd.className = "";
                 if (diff > 0) {
@@ -1082,6 +1276,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const displayTarget = data.name && data.name !== data.code ? `${data.name} (${data.code})` : data.code;
         t3ChartTitle.textContent = `최신 기술지표 요약 (${displayTarget} · 기준일 ${latest.date || "-"})`;
+        syncFavButton(t3FavBtn, data.code, data.name || data.code);
 
         const latestCards = [
             { label: "종가", value: formatPrice(latest.close, data.currency || "KRW"), hint: "최근 거래일 마감 가격" },
@@ -1278,6 +1473,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderTab4DartDashboard(data) {
         const comp = data.company || {};
         t4CompanyTitle.textContent = `${data.name} (${data.code}) · DART 공식 개황`;
+        syncFavButton(t4FavBtn, data.code, data.name);
         if (comp.hm_url) {
             const url = comp.hm_url.startsWith("http") ? comp.hm_url : `https://${comp.hm_url}`;
             t4HomepageLink.href = url;
