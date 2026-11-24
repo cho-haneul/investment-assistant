@@ -777,3 +777,62 @@ body {
     color: #64748b;
     margin-top: 6px;
 }
+.autocomplete-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+    z-index: 50;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.autocomplete-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.9rem;
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+.autocomplete-item:hover {
+    background: #f1f5f9;
+}
+
+.autocomplete-meta {
+    font-size: 0.78rem;
+    color: #64748b;
+}
+
+.qty-input {
+    width: 72px;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    text-align: right;
+    font-size: 0.86rem;
+}
+
+.action-buy {
+    color: #dc2626;
+    font-weight: 700;
+}
+
+.action-sell {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.action-hold {
+    color: #64748b;
+}

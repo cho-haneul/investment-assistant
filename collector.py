@@ -108,6 +108,45 @@ def fetch_basic(code):
     return {"name": name, "asset_type": asset_type, "snapshot": basic_snapshot}, None
 
 
+def search_stocks(query, limit=8):
+    """네이버 증권 자동완성 API로 국내 주식·ETF 및 미국 주식·ETF를 이름/티커로 검색합니다."""
+    q = str(query or "").strip()
+    if not q:
+        return [], None
+
+    url = "https://ac.stock.naver.com/ac"
+    params = {"q": q, "target": "stock,etf,worldstock"}
+    try:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=4)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.exceptions.RequestException, ValueError) as e:
+        return [], f"종목 검색 실패: {str(e)}"
+
+    results = []
+    seen = set()
+    for item in (data.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "").strip().upper()
+        name = str(item.get("name") or "").strip()
+        if not code or not name or code in seen:
+            continue
+        if not (len(code) == 6 and code.isdigit()) and not is_us_ticker(code):
+            continue
+        seen.add(code)
+        results.append({
+            "code": code,
+            "name": name,
+            "nation": item.get("nationCode") or "KOR",
+            "market": item.get("typeName") or item.get("typeCode") or "",
+        })
+        if len(results) >= limit:
+            break
+
+    return results, None
+
+
 def fetch_stock_name(code):
     """종목코드(국내 6자리 또는 미국 티커)로 공식 종목명(또는 ETF명)만 빠르게 조회합니다."""
     is_valid, validated_code = validate_code(code)

@@ -3,7 +3,7 @@ import os
 import logging
 from flask import Flask, jsonify, render_template, request
 from dotenv import load_dotenv
-from collector import collect_stock_data
+from collector import collect_stock_data, search_stocks
 from dify_client import ask_analysis_bot, ask_tech_bot
 from quant import calculate_rebalancing, calculate_technical_indicators
 
@@ -56,6 +56,18 @@ def health_check():
             "dify_tech_configured": dify_tech_configured,
         }
     }), 200
+
+
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    """종목명 또는 티커로 국내/미국 주식 및 ETF를 검색합니다."""
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"items": []}), 200
+    items, err = search_stocks(q, limit=8)
+    if err:
+        return jsonify({"items": [], "error": err}), 502
+    return jsonify({"items": items}), 200
 
 
 @app.route("/fetch", methods=["POST"])
@@ -214,6 +226,8 @@ def api_rebalance():
     years = body.get("years", 1)
     rebalance_freq = body.get("rebalance_freq", "none")
     initial_capital = body.get("initial_capital", 10_000_000)
+    benchmark = body.get("benchmark", "069500")
+    strategy_mode = body.get("strategy_mode", "static")
 
     if isinstance(raw_codes, str):
         codes = [c.strip() for c in raw_codes.replace("\n", ",").split(",") if c.strip()]
@@ -222,12 +236,14 @@ def api_rebalance():
     else:
         return jsonify({"error": "종목코드 목록 형식이 올바르지 않습니다."}), 400
 
-    logger.info(f"[REBALANCE] 리밸런싱 계산 요청 수신 (codes={codes}, years={years}, freq={rebalance_freq})")
+    logger.info(f"[REBALANCE] 리밸런싱 계산 요청 수신 (codes={codes}, years={years}, freq={rebalance_freq}, mode={strategy_mode}, bench={benchmark})")
     result, err = calculate_rebalancing(
         codes,
         years=years,
         rebalance_freq=rebalance_freq,
         initial_capital=initial_capital,
+        benchmark=benchmark,
+        strategy_mode=strategy_mode,
     )
     if err:
         return jsonify({"error": err}), 400

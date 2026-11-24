@@ -57,6 +57,68 @@ document.addEventListener("DOMContentLoaded", () => {
         return /^\d{6}$/.test(s) || /^[A-Z]{1,5}([.-][A-Z]{1,2})?$/.test(s);
     }
 
+    async function resolveCodeOrSearch(rawInput) {
+        const val = String(rawInput || "").trim();
+        if (!val) return "";
+        if (isValidSymbol(val)) return val.toUpperCase();
+        try {
+            const resp = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
+            const data = await resp.json();
+            if (data.items && data.items.length > 0) {
+                return data.items[0].code;
+            }
+        } catch (err) {
+            console.warn("[SEARCH] 자동 코드 변환 실패:", err);
+        }
+        return val;
+    }
+
+    function setupAutocomplete(inputEl, listEl, onSelect) {
+        if (!inputEl || !listEl) return;
+        let timer = null;
+
+        inputEl.addEventListener("input", () => {
+            const q = inputEl.value.trim();
+            clearTimeout(timer);
+            if (!q || isValidSymbol(q)) {
+                hideEl(listEl);
+                return;
+            }
+            timer = setTimeout(async () => {
+                try {
+                    const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+                    const data = await resp.json();
+                    const items = data.items || [];
+                    if (items.length === 0) {
+                        hideEl(listEl);
+                        return;
+                    }
+                    listEl.innerHTML = "";
+                    items.forEach((item) => {
+                        const row = document.createElement("div");
+                        row.className = "autocomplete-item";
+                        row.innerHTML = `<span class="ac-name"></span><span class="autocomplete-meta"></span>`;
+                        row.querySelector(".ac-name").textContent = `${item.name} (${item.code})`;
+                        row.querySelector(".autocomplete-meta").textContent = item.market || item.nation;
+                        row.addEventListener("mousedown", (e) => {
+                            e.preventDefault();
+                            hideEl(listEl);
+                            onSelect(item);
+                        });
+                        listEl.appendChild(row);
+                    });
+                    showEl(listEl);
+                } catch (err) {
+                    hideEl(listEl);
+                }
+            }, 250);
+        });
+
+        inputEl.addEventListener("blur", () => {
+            setTimeout(() => hideEl(listEl), 150);
+        });
+    }
+
     // ==================== 3탭 전환 ====================
     const tabButtons = document.querySelectorAll(".tab-btn");
     const tabPanels = document.querySelectorAll(".tab-panel");
@@ -81,6 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1FetchForm = document.getElementById("t1-fetch-form");
     const t1FetchBtn = document.getElementById("t1-fetch-btn");
     const t1CodeInput = document.getElementById("t1-code-input");
+    const t1AcList = document.getElementById("t1-ac-list");
     const t1UseTools = document.getElementById("t1-use-tools");
     const t1Status = document.getElementById("t1-status");
     const t1Error = document.getElementById("t1-error");
@@ -119,9 +182,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    t1FetchForm.addEventListener("submit", (e) => {
+    setupAutocomplete(t1CodeInput, t1AcList, (item) => {
+        t1CodeInput.value = item.code;
+        runTab1FetchAndAnalyze(item.code);
+    });
+
+    t1FetchForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        runTab1FetchAndAnalyze(t1CodeInput.value.trim());
+        const resolved = await resolveCodeOrSearch(t1CodeInput.value);
+        t1CodeInput.value = resolved;
+        runTab1FetchAndAnalyze(resolved);
     });
 
     t1ResetBtn.addEventListener("click", () => {
@@ -583,15 +653,32 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const t2Form = document.getElementById("t2-form");
     const t2CodesInput = document.getElementById("t2-codes-input");
+    const t2SearchInput = document.getElementById("t2-search-input");
+    const t2AcList = document.getElementById("t2-ac-list");
     const t2YearsInput = document.getElementById("t2-years");
     const t2FreqInput = document.getElementById("t2-freq");
+    const t2StrategyInput = document.getElementById("t2-strategy");
+    const t2BenchmarkInput = document.getElementById("t2-benchmark");
     const t2CapitalInput = document.getElementById("t2-capital");
     const t2CalcBtn = document.getElementById("t2-calc-btn");
     const t2Status = document.getElementById("t2-status");
     const t2Error = document.getElementById("t2-error");
     const t2Result = document.getElementById("t2-result");
     const t2SummaryGrid = document.getElementById("t2-summary-grid");
+    const t2FxNote = document.getElementById("t2-fx-note");
     const t2AssetsTbody = document.getElementById("t2-assets-tbody");
+    const t2YearlyCard = document.getElementById("t2-yearly-card");
+    const t2YearlyBenchTh = document.getElementById("t2-yearly-bench-th");
+    const t2YearlyTbody = document.getElementById("t2-yearly-tbody");
+
+    setupAutocomplete(t2SearchInput, t2AcList, (item) => {
+        const cur = t2CodesInput.value.split(",").map((s) => s.trim()).filter(Boolean);
+        if (!cur.includes(item.code)) {
+            cur.push(item.code);
+            t2CodesInput.value = cur.join(", ");
+        }
+        t2SearchInput.value = "";
+    });
 
     document.querySelectorAll(".t2-preset").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -606,6 +693,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!rawCodes) return;
         const years = Number(t2YearsInput ? t2YearsInput.value : 1) || 1;
         const rebalanceFreq = t2FreqInput ? t2FreqInput.value : "none";
+        const strategyMode = t2StrategyInput ? t2StrategyInput.value : "static";
+        const benchmark = t2BenchmarkInput ? t2BenchmarkInput.value : "069500";
         const initialCapital = Number(t2CapitalInput ? t2CapitalInput.value : 10000000) || 10000000;
 
         hideEl(t2Error);
@@ -614,7 +703,7 @@ document.addEventListener("DOMContentLoaded", () => {
         t2CalcBtn.disabled = true;
 
         try {
-            console.log(`[TAB2] POST /api/rebalance (codes=${rawCodes}, years=${years}, freq=${rebalanceFreq})`);
+            console.log(`[TAB2] POST /api/rebalance (codes=${rawCodes}, years=${years}, freq=${rebalanceFreq}, mode=${strategyMode}, bench=${benchmark})`);
             const resp = await fetch("/api/rebalance", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -622,6 +711,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     codes: rawCodes,
                     years,
                     rebalance_freq: rebalanceFreq,
+                    strategy_mode: strategyMode,
+                    benchmark,
                     initial_capital: initialCapital,
                 }),
             });
@@ -648,36 +739,89 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderRebalanceResult(data) {
         const opt = data.optimal_portfolio || {};
         const eq = data.equal_portfolio || {};
+        const bench = data.benchmark || null;
         const period = data.period || {};
+        const fxRate = data.usd_krw_rate || 1400;
+
+        if (t2FxNote) {
+            t2FxNote.textContent = data.usd_krw_rate
+                ? `보유 수량(주)을 입력하면 매매 수량을 즉시 계산합니다 (적용 환율: 1 USD = ${formatNum(fxRate, "원")})`
+                : "보유 수량(주)을 입력하면 목표 비중에 필요한 매매 수량을 즉시 계산합니다";
+        }
 
         const summaryCards = [
-            { label: "최적 연평균 복리(CAGR)", value: `${opt.cagr_pct ?? opt.expected_return_pct}%`, hint: `${period.years || 1}년 백테스트 기준 실제 복리 수익률` },
+            { label: period.strategy_mode === "momentum" ? "동적 모멘텀 CAGR" : "최적 연평균 복리(CAGR)", value: `${opt.cagr_pct ?? opt.expected_return_pct}%`, hint: `${period.years || 1}년 백테스트 기준 실제 복리 수익률` },
             { label: "최적 최종 평가액", value: formatNum(opt.final_value, "원"), hint: `초기 ${formatNum(data.initial_capital, "원")} 투자 시` },
-            { label: "최대 샤프지수", value: `${opt.sharpe_ratio}`, hint: "위험 대비 초과수익 (높을수록 우수)" },
-            { label: "최적 포트폴리오 MDD", value: `${opt.mdd_pct}%`, hint: "고점 대비 최대 하락폭" },
-            { label: "동일비중 CAGR / 최종액", value: `${eq.cagr_pct ?? eq.expected_return_pct}% / ${formatNum(eq.final_value, "원")}`, hint: "모든 종목을 똑같이 나눴을 때" },
-            { label: "동일비중 샤프 / MDD", value: `${eq.sharpe_ratio} / ${eq.mdd_pct}%`, hint: "최적 비중과 성과 비교" },
+            { label: "최대 샤프지수 / MDD", value: `${opt.sharpe_ratio} / ${opt.mdd_pct}%`, hint: "위험 대비 초과수익 / 최대 낙폭" },
+            { label: "동일비중 CAGR / MDD", value: `${eq.cagr_pct ?? eq.expected_return_pct}% / ${eq.mdd_pct}%`, hint: `최종 ${formatNum(eq.final_value, "원")}` },
+            ...(bench ? [{ label: `벤치마크 (${bench.name})`, value: `${bench.cagr_pct}% / ${bench.mdd_pct}%`, hint: `CAGR / MDD (최종 ${formatNum(bench.final_value, "원")})` }] : []),
         ];
 
         renderMetricCards(t2SummaryGrid, summaryCards);
 
-        // 종목별 테이블
+        // 종목별 테이블 + 실전 매수/매도 수량 계산기
         t2AssetsTbody.innerHTML = "";
         const assets = data.assets || [];
         assets.forEach((a) => {
             const tr = document.createElement("tr");
             const displayName = a.name && a.name !== a.code ? `${a.name} (${a.code})` : a.code;
-            const vals = [
-                displayName,
-                `${a.optimal_weight_pct}%`,
-                formatNum(a.target_amount, "원"),
-                `${a.min_vol_weight_pct}%`,
-                `${a.equal_weight_pct}%`,
+            const unitPriceKrw = a.currency === "USD" ? (a.latest_price * fxRate) : a.latest_price;
+            const targetShares = unitPriceKrw > 0 ? Math.floor(a.target_amount / unitPriceKrw) : 0;
+
+            const nameTd = document.createElement("td");
+            nameTd.textContent = displayName;
+            tr.appendChild(nameTd);
+
+            const pxTd = document.createElement("td");
+            pxTd.textContent = formatPrice(a.latest_price, a.currency || "KRW");
+            tr.appendChild(pxTd);
+
+            const wTd = document.createElement("td");
+            wTd.textContent = `${a.optimal_weight_pct}%`;
+            tr.appendChild(wTd);
+
+            const amtTd = document.createElement("td");
+            amtTd.textContent = formatNum(a.target_amount, "원");
+            tr.appendChild(amtTd);
+
+            const tgtQtyTd = document.createElement("td");
+            tgtQtyTd.textContent = `${targetShares.toLocaleString("ko-KR")}주`;
+            tr.appendChild(tgtQtyTd);
+
+            const curQtyTd = document.createElement("td");
+            const qtyInput = document.createElement("input");
+            qtyInput.type = "number";
+            qtyInput.min = "0";
+            qtyInput.value = "0";
+            qtyInput.className = "qty-input";
+            curQtyTd.appendChild(qtyInput);
+            tr.appendChild(curQtyTd);
+
+            const diffTd = document.createElement("td");
+            const updateDiff = () => {
+                const curQty = Math.max(0, parseInt(qtyInput.value || "0", 10) || 0);
+                const diff = targetShares - curQty;
+                diffTd.className = "";
+                if (diff > 0) {
+                    diffTd.classList.add("action-buy");
+                    diffTd.textContent = `+${diff.toLocaleString("ko-KR")}주 매수`;
+                } else if (diff < 0) {
+                    diffTd.classList.add("action-sell");
+                    diffTd.textContent = `${diff.toLocaleString("ko-KR")}주 매도`;
+                } else {
+                    diffTd.classList.add("action-hold");
+                    diffTd.textContent = "유지 (0주)";
+                }
+            };
+            updateDiff();
+            qtyInput.addEventListener("input", updateDiff);
+            tr.appendChild(diffTd);
+
+            [
                 `${a.annual_return_pct}%`,
                 `${a.annual_volatility_pct}%`,
                 `${a.mdd_pct}%`,
-            ];
-            vals.forEach((v) => {
+            ].forEach((v) => {
                 const td = document.createElement("td");
                 td.textContent = v;
                 tr.appendChild(td);
@@ -685,19 +829,53 @@ document.addEventListener("DOMContentLoaded", () => {
             t2AssetsTbody.appendChild(tr);
         });
 
-        // 누적 자산 성장 곡선 & MDD 추이 차트
+        // 연도별 수익률 표
+        const yearly = data.yearly_returns || [];
+        if (yearly.length > 0 && t2YearlyCard && t2YearlyTbody) {
+            showEl(t2YearlyCard);
+            if (t2YearlyBenchTh) {
+                t2YearlyBenchTh.textContent = bench ? `벤치마크 (${bench.name})` : "벤치마크";
+            }
+            t2YearlyTbody.innerHTML = "";
+            yearly.forEach((yr) => {
+                const tr = document.createElement("tr");
+                [
+                    `${yr.year}년`,
+                    formatReturnRate(yr.optimal_pct),
+                    formatReturnRate(yr.equal_pct),
+                    yr.benchmark_pct !== null ? formatReturnRate(yr.benchmark_pct) : "-",
+                ].forEach((val) => {
+                    const td = document.createElement("td");
+                    td.textContent = val;
+                    tr.appendChild(td);
+                });
+                t2YearlyTbody.appendChild(tr);
+            });
+        } else if (t2YearlyCard) {
+            hideEl(t2YearlyCard);
+        }
+
+        // 누적 자산 성장 곡선 & MDD 추이 차트 (벤치마크 포함)
         const eqCurve = data.equity_curve || [];
         const eqLabels = eqCurve.map((p) => p.date);
+        const eqDatasets = [
+            { label: period.strategy_mode === "momentum" ? "동적 모멘텀 전략" : "최적 비중 (최대 샤프)", data: eqCurve.map((p) => p.optimal_value), borderColor: "#2563eb", borderWidth: 2, pointRadius: 0 },
+            { label: "동일 비중", data: eqCurve.map((p) => p.equal_value), borderColor: "#10b981", borderWidth: 1.8, borderDash: [4, 4], pointRadius: 0 },
+        ];
+        if (bench) {
+            eqDatasets.push({
+                label: `벤치마크 (${bench.name})`,
+                data: eqCurve.map((p) => p.benchmark_value),
+                borderColor: "#f59e0b",
+                borderWidth: 1.8,
+                borderDash: [2, 2],
+                pointRadius: 0,
+            });
+        }
         if (t2EquityChart) t2EquityChart.destroy();
         t2EquityChart = new Chart(document.getElementById("t2-equity-chart"), {
             type: "line",
-            data: {
-                labels: eqLabels,
-                datasets: [
-                    { label: "최적 비중 (최대 샤프)", data: eqCurve.map((p) => p.optimal_value), borderColor: "#2563eb", borderWidth: 2, pointRadius: 0 },
-                    { label: "동일 비중", data: eqCurve.map((p) => p.equal_value), borderColor: "#10b981", borderWidth: 1.8, borderDash: [4, 4], pointRadius: 0 },
-                ],
-            },
+            data: { labels: eqLabels, datasets: eqDatasets },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -705,16 +883,24 @@ document.addEventListener("DOMContentLoaded", () => {
             },
         });
 
+        const ddDatasets = [
+            { label: "최적/모멘텀 낙폭 (%)", data: eqCurve.map((p) => p.optimal_dd_pct), borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.12)", fill: true, borderWidth: 1.8, pointRadius: 0 },
+            { label: "동일 비중 낙폭 (%)", data: eqCurve.map((p) => p.equal_dd_pct), borderColor: "#64748b", borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+        ];
+        if (bench) {
+            ddDatasets.push({
+                label: `벤치마크 (${bench.name}) 낙폭 (%)`,
+                data: eqCurve.map((p) => p.benchmark_dd_pct),
+                borderColor: "#f59e0b",
+                borderDash: [2, 2],
+                borderWidth: 1.5,
+                pointRadius: 0,
+            });
+        }
         if (t2DdChart) t2DdChart.destroy();
         t2DdChart = new Chart(document.getElementById("t2-dd-chart"), {
             type: "line",
-            data: {
-                labels: eqLabels,
-                datasets: [
-                    { label: "최적 비중 낙폭 (%)", data: eqCurve.map((p) => p.optimal_dd_pct), borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,0.12)", fill: true, borderWidth: 1.8, pointRadius: 0 },
-                    { label: "동일 비중 낙폭 (%)", data: eqCurve.map((p) => p.equal_dd_pct), borderColor: "#64748b", borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
-                ],
-            },
+            data: { labels: eqLabels, datasets: ddDatasets },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -793,6 +979,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const t3Form = document.getElementById("t3-form");
     const t3CodeInput = document.getElementById("t3-code-input");
+    const t3AcList = document.getElementById("t3-ac-list");
     const t3LoadBtn = document.getElementById("t3-load-btn");
     const t3Status = document.getElementById("t3-status");
     const t3Error = document.getElementById("t3-error");
@@ -813,9 +1000,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    t3Form.addEventListener("submit", (e) => {
+    setupAutocomplete(t3CodeInput, t3AcList, (item) => {
+        t3CodeInput.value = item.code;
+        loadTechnicalData(item.code);
+    });
+
+    t3Form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        loadTechnicalData(t3CodeInput.value.trim());
+        const resolved = await resolveCodeOrSearch(t3CodeInput.value);
+        t3CodeInput.value = resolved;
+        loadTechnicalData(resolved);
     });
 
     t3ResetBtn.addEventListener("click", () => {

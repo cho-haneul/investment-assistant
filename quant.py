@@ -35,10 +35,16 @@ def _compute_mdd(daily_returns):
     return round(float(drawdown.min() * 100.0), 2)
 
 
-def _simulate_portfolio_curve(price_df, weights, rebalance_freq="none", initial_capital=10_000_000):
+def _simulate_portfolio_curve(
+    price_df,
+    weights,
+    rebalance_freq="none",
+    initial_capital=10_000_000,
+    strategy_mode="static",
+):
     """
-    일별 종가 DataFrame과 목표 비중으로 리밸런싱 주기를 반영한 자산 성장 곡선, CAGR, MDD 시계열을 계산합니다.
-    rebalance_freq: 'none' (리밸런싱 없음), 'M' (월간), 'Q' (분기), 'Y' (연간)
+    일별 종가 DataFrame과 목표 비중으로 리밸런싱 주기 및 전략 모드(정적/동적 모멘텀)를 반영한
+    자산 성장 곡선, CAGR, MDD 시계열을 계산합니다.
     """
     prices = price_df.values.astype(float)
     dates = price_df.index
@@ -46,26 +52,46 @@ def _simulate_portfolio_curve(price_df, weights, rebalance_freq="none", initial_
     if n_days == 0:
         return np.array([]), np.array([]), 0.0, 0.0
 
-    shares = (initial_capital * weights) / prices[0]
+    # 동적 모멘텀 전략용 60일 이동평균선 (60일 미만 구간은 누적 평균 사용)
+    ma60 = price_df.rolling(window=60, min_periods=1).mean().values.astype(float)
+
+    def _effective_weights(t):
+        if strategy_mode != "momentum":
+            return weights
+        active = prices[t] >= ma60[t]
+        masked = np.where(active, weights, 0.0)
+        s = float(masked.sum())
+        if s > 0:
+            return masked / s
+        return np.zeros_like(weights)  # 전 종목 하락 추세면 현금 보유
+
+    eff_w0 = _effective_weights(0)
+    shares = (initial_capital * eff_w0) / prices[0]
+    cash = float(initial_capital * max(0.0, 1.0 - float(eff_w0.sum())))
     values = np.empty(n_days, dtype=float)
 
+    # 동적 모멘텀 전략은 리밸런싱 주기가 'none'이면 월간('M')으로 추세 점검
+    eff_freq = "M" if (strategy_mode == "momentum" and rebalance_freq == "none") else rebalance_freq
+
     def _period_key(d):
-        if rebalance_freq == "M":
+        if eff_freq == "M":
             return (d.year, d.month)
-        if rebalance_freq == "Q":
+        if eff_freq == "Q":
             return (d.year, (d.month - 1) // 3)
-        if rebalance_freq == "Y":
+        if eff_freq == "Y":
             return d.year
         return None
 
-    prev_key = _period_key(dates[0]) if rebalance_freq != "none" else None
+    prev_key = _period_key(dates[0]) if eff_freq != "none" else None
     for t in range(n_days):
-        total_val = float(np.dot(shares, prices[t]))
+        total_val = float(np.dot(shares, prices[t])) + cash
         values[t] = total_val
-        if rebalance_freq != "none" and t > 0:
+        if eff_freq != "none" and t > 0:
             cur_key = _period_key(dates[t])
             if cur_key != prev_key:
-                shares = (total_val * weights) / prices[t]
+                eff_w = _effective_weights(t)
+                shares = (total_val * eff_w) / prices[t]
+                cash = float(total_val * max(0.0, 1.0 - float(eff_w.sum())))
                 prev_key = cur_key
 
     running_max = np.maximum.accumulate(values)
@@ -77,6 +103,45 @@ def _simulate_portfolio_curve(price_df, weights, rebalance_freq="none", initial_
     return values, dd_series, cagr_pct, mdd_pct
 
 
+def _compute_yearly_returns(dates, opt_curve, eq_curve, bench_curve=None):
+    """연도별 수익률(%) 비교표를 계산합니다."""
+    df = pd.DataFrame({"opt": opt_curve, "eq": eq_curve}, index=dates)
+    if bench_curve is not None and len(bench_curve) == len(dates):
+        df["bench"] = bench_curve
+
+    yearly = []
+    for yr, grp in df.groupby(df.index.year):
+        if len(grp) < 2:
+            continue
+        row = {
+            "year": int(yr),
+            "optimal_pct": round(float((grp["opt"].iloc[-1] / grp["opt"].iloc[0] - 1.0) * 100.0), 2),
+            "equal_pct": round(float((grp["eq"].iloc[-1] / grp["eq"].iloc[0] - 1.0) * 100.0), 2),
+            "benchmark_pct": (
+                round(float((grp["bench"].iloc[-1] / grp["bench"].iloc[0] - 1.0) * 100.0), 2)
+                if "bench" in grp.columns
+                else None
+            ),
+        }
+        yearly.append(row)
+    return yearly
+
+
+def _get_usd_krw_rate():
+    """최신 USD/KRW 환율을 조회합니다. 실패 시 1400.0을 반환합니다."""
+    try:
+        end_d = dt.date.today()
+        start_d = end_d - dt.timedelta(days=14)
+        df = fdr.DataReader("USD/KRW", start_d.strftime("%Y-%m-%d"), end_d.strftime("%Y-%m-%d"))
+        if df is not None and not df.empty and "Close" in df.columns:
+            val = df["Close"].dropna().iloc[-1]
+            if float(val) > 500:
+                return round(float(val), 2)
+    except Exception:
+        pass
+    return 1400.0
+
+
 def calculate_rebalancing(
     codes,
     num_portfolios=2500,
@@ -84,10 +149,13 @@ def calculate_rebalancing(
     years=1,
     rebalance_freq="none",
     initial_capital=10_000_000,
+    benchmark="069500",
+    strategy_mode="static",
 ):
     """
     FinanceDataReader 종가 데이터를 바탕으로
-    몬테카를로·효율적 프론티어 적정 비중, 누적 수익률 곡선, CAGR, MDD, 목표 투자금을 계산합니다.
+    몬테카를로·효율적 프론티어 적정 비중, 누적 수익률 곡선, 벤치마크 비교, 연도별 수익률,
+    동적 모멘텀 전략, CAGR, MDD, 목표 투자금을 계산합니다.
     """
     cleaned_codes, err = _clean_codes(codes)
     if err:
@@ -109,6 +177,11 @@ def calculate_rebalancing(
     elif rebalance_freq == "NONE":
         rebalance_freq = "none"
 
+    strategy_mode = "momentum" if str(strategy_mode or "static").lower() == "momentum" else "static"
+    benchmark = str(benchmark or "069500").strip().upper()
+    if benchmark not in ("069500", "SPY", "NONE"):
+        benchmark = "069500"
+
     try:
         initial_capital = max(100_000, float(initial_capital))
     except (TypeError, ValueError):
@@ -119,7 +192,7 @@ def calculate_rebalancing(
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
 
-    logger.info(f"[QUANT] 리밸런싱 데이터 수집 시작 (codes={cleaned_codes}, {start_str}~{end_str}, freq={rebalance_freq})")
+    logger.info(f"[QUANT] 리밸런싱 데이터 수집 시작 (codes={cleaned_codes}, {start_str}~{end_str}, freq={rebalance_freq}, mode={strategy_mode}, bench={benchmark})")
 
     series_map = {}
     for code in cleaned_codes:
@@ -166,13 +239,50 @@ def calculate_rebalancing(
     eq_vol = float(np.sqrt(equal_weights.T @ cov_matrix @ equal_weights))
     eq_sharpe = (eq_ret - risk_free_rate) / eq_vol if eq_vol > 0 else 0.0
 
-    # 백테스트 곡선 (리밸런싱 주기 및 초기 투자금 반영)
+    # 백테스트 곡선 (리밸런싱 주기, 전략 모드 및 초기 투자금 반영)
     opt_curve, opt_dd, opt_cagr, opt_sim_mdd = _simulate_portfolio_curve(
-        price_df, best_weights, rebalance_freq=rebalance_freq, initial_capital=initial_capital
+        price_df,
+        best_weights,
+        rebalance_freq=rebalance_freq,
+        initial_capital=initial_capital,
+        strategy_mode=strategy_mode,
     )
     eq_curve, eq_dd, eq_cagr, eq_sim_mdd = _simulate_portfolio_curve(
-        price_df, equal_weights, rebalance_freq=rebalance_freq, initial_capital=initial_capital
+        price_df,
+        equal_weights,
+        rebalance_freq=rebalance_freq,
+        initial_capital=initial_capital,
+        strategy_mode="static",
     )
+
+    # 벤치마크 곡선 (KODEX 200 또는 SPY)
+    bench_curve = None
+    bench_dd = None
+    bench_summary = None
+    if benchmark != "NONE":
+        try:
+            bdf = fdr.DataReader(benchmark, start_str, end_str)
+            if bdf is not None and not bdf.empty and "Close" in bdf.columns:
+                b_series = bdf["Close"].dropna().reindex(price_df.index).ffill().bfill()
+                if not b_series.isna().any() and float(b_series.iloc[0]) > 0:
+                    b_vals = (b_series.values.astype(float) / float(b_series.iloc[0])) * initial_capital
+                    b_max = np.maximum.accumulate(b_vals)
+                    bench_dd = (b_vals - b_max) / b_max * 100.0
+                    bench_curve = b_vals
+                    years_elapsed = max(len(b_vals) - 1, 1) / 252.0
+                    bench_cagr = round(float(((b_vals[-1] / initial_capital) ** (1.0 / years_elapsed) - 1.0) * 100.0), 2)
+                    bench_summary = {
+                        "code": benchmark,
+                        "name": "KODEX 200" if benchmark == "069500" else "S&P 500 (SPY)",
+                        "cagr_pct": bench_cagr,
+                        "final_value": round(float(b_vals[-1]), 0),
+                        "mdd_pct": round(float(bench_dd.min()), 2),
+                    }
+        except Exception as e:
+            logger.warning(f"[QUANT] 벤치마크 조회 실패 (benchmark={benchmark}): {e}")
+
+    # 연도별 수익률 비교표
+    yearly_returns = _compute_yearly_returns(price_df.index, opt_curve, eq_curve, bench_curve)
 
     # 차트 시각화용 성장 곡선 및 MDD 샘플링 (최대 120포인트)
     curve_step = max(1, len(price_df) // 120)
@@ -184,22 +294,31 @@ def calculate_rebalancing(
             "date": price_df.index[i].strftime("%Y-%m-%d") if hasattr(price_df.index[i], "strftime") else str(price_df.index[i]),
             "optimal_value": round(float(opt_curve[i]), 0),
             "equal_value": round(float(eq_curve[i]), 0),
+            "benchmark_value": round(float(bench_curve[i]), 0) if bench_curve is not None else None,
             "optimal_dd_pct": round(float(opt_dd[i]), 2),
             "equal_dd_pct": round(float(eq_dd[i]), 2),
+            "benchmark_dd_pct": round(float(bench_dd[i]), 2) if bench_dd is not None else None,
         }
         for i in curve_indices
     ]
 
-    # 개별 종목 요약 (연율화 수익률, 변동성, 최적 비중, 목표 투자금)
+    has_us = any(is_us_ticker(c) for c in cleaned_codes)
+    usd_krw_rate = _get_usd_krw_rate() if has_us else None
+
+    # 개별 종목 요약 (연율화 수익률, 변동성, 최적 비중, 목표 투자금, 최신 주가)
     assets_summary = []
     for i, code in enumerate(cleaned_codes):
         asset_daily = returns[code]
         asset_ret = float(mean_returns[i] * 100.0)
         asset_vol = float(np.sqrt(cov_matrix[i, i]) * 100.0)
         opt_w_pct = round(float(best_weights[i] * 100.0), 2)
+        is_us = is_us_ticker(code)
+        latest_px = round(float(price_df[code].iloc[-1]), 2 if is_us else 0)
         assets_summary.append({
             "code": code,
             "name": fetch_stock_name(code),
+            "currency": "USD" if is_us else "KRW",
+            "latest_price": latest_px,
             "optimal_weight_pct": opt_w_pct,
             "target_amount": round(float(initial_capital * best_weights[i]), 0),
             "min_vol_weight_pct": round(float(min_vol_weights[i] * 100.0), 2),
@@ -226,9 +345,13 @@ def calculate_rebalancing(
             "end": end_str,
             "years": years,
             "rebalance_freq": rebalance_freq,
+            "strategy_mode": strategy_mode,
             "trading_days": int(len(returns)),
         },
         "initial_capital": round(float(initial_capital), 0),
+        "usd_krw_rate": usd_krw_rate,
+        "benchmark": bench_summary,
+        "yearly_returns": yearly_returns,
         "num_simulations": int(num_portfolios),
         "risk_free_rate_pct": round(risk_free_rate * 100.0, 2),
         "assets": assets_summary,
