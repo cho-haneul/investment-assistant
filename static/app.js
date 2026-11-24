@@ -75,6 +75,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==================== 탭 1: 종목 심층분석 채팅 ====================
     let t1ConversationId = null;
     let t1CachedStockData = null;
+    let t1Chart1 = null;
+    let t1Chart2 = null;
 
     const t1FetchForm = document.getElementById("t1-fetch-form");
     const t1FetchBtn = document.getElementById("t1-fetch-btn");
@@ -88,6 +90,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1CurrentPriceEl = document.getElementById("t1-current-price");
     const t1PriceChangeEl = document.getElementById("t1-price-change");
     const t1SnapshotGridEl = document.getElementById("t1-snapshot-grid");
+    const t1GaugeEl = document.getElementById("t1-52w-gauge");
+    const t1ChartsRowEl = document.getElementById("t1-charts-row");
+    const t1Chart1TitleEl = document.getElementById("t1-chart-1-title");
+    const t1Chart2TitleEl = document.getElementById("t1-chart-2-title");
     const t1FinancialsCardEl = document.getElementById("t1-financials-card");
     const t1FinanceUnitNoteEl = document.getElementById("t1-finance-unit-note");
     const t1FinancialsTbodyEl = document.getElementById("t1-financials-tbody");
@@ -149,6 +155,127 @@ document.addEventListener("DOMContentLoaded", () => {
         const num = Number(val);
         const sign = num > 0 ? "+" : "";
         return `${sign}${num.toLocaleString("ko-KR")}%`;
+    }
+
+    function renderTab1Visuals(data) {
+        if (t1Chart1) { t1Chart1.destroy(); t1Chart1 = null; }
+        if (t1Chart2) { t1Chart2.destroy(); t1Chart2 = null; }
+
+        // 1. 52주 가격 위치 게이지
+        const snap = data.snapshot || {};
+        const currency = data.currency || "KRW";
+        const low52 = snap.low_52w;
+        const high52 = snap.high_52w;
+        const curPrice = snap.current_price;
+
+        if (low52 !== null && high52 !== null && curPrice !== null && high52 > low52) {
+            const pct = Math.max(0, Math.min(100, ((curPrice - low52) / (high52 - low52)) * 100));
+            const pctRound = pct.toFixed(1);
+            t1GaugeEl.innerHTML = `
+                <div class="range-gauge-header">
+                    <span>52주 주가 위치 게이지</span>
+                    <span>현재가 위치: <strong>${pctRound}%</strong> (0%=신저가 · 100%=신고가)</span>
+                </div>
+                <div class="range-track">
+                    <div class="range-marker" style="left: ${pctRound}%;"></div>
+                </div>
+                <div class="range-labels">
+                    <span>52주 최저 ${formatPrice(low52, currency)}</span>
+                    <span>현재 ${formatPrice(curPrice, currency)}</span>
+                    <span>52주 최고 ${formatPrice(high52, currency)}</span>
+                </div>
+            `;
+            showEl(t1GaugeEl);
+        } else {
+            hideEl(t1GaugeEl);
+        }
+
+        const isEtf = data.asset_type === "etf";
+        const financials = data.financials || [];
+        const etf = data.etf_info || {};
+
+        if (!isEtf && financials.length > 0) {
+            showEl(t1ChartsRowEl);
+            const labels = financials.map((r) => (r.is_consensus ? `${r.period}(E)` : r.period));
+            const unitLabel = data.finance_unit || "억원";
+
+            t1Chart1TitleEl.textContent = `연간 매출 · 영업이익 · 순이익 추이 (${unitLabel})`;
+            t1Chart1 = new Chart(document.getElementById("t1-chart-1"), {
+                type: "bar",
+                data: {
+                    labels,
+                    datasets: [
+                        { label: "매출액", data: financials.map((r) => r.revenue), backgroundColor: "rgba(37, 99, 235, 0.7)" },
+                        { label: "영업이익", data: financials.map((r) => r.operating_profit), backgroundColor: "rgba(16, 185, 129, 0.75)" },
+                        { label: "당기순이익", data: financials.map((r) => r.net_income), backgroundColor: "rgba(245, 158, 11, 0.75)" },
+                    ],
+                },
+                options: { responsive: true, maintainAspectRatio: false },
+            });
+
+            const hasRoeOrDebt = financials.some((r) => r.roe !== null || r.debt_ratio !== null);
+            if (hasRoeOrDebt) {
+                t1Chart2TitleEl.textContent = "수익성(ROE·영업이익률) & 안정성(부채비율) (%)";
+                t1Chart2 = new Chart(document.getElementById("t1-chart-2"), {
+                    type: "line",
+                    data: {
+                        labels,
+                        datasets: [
+                            { label: "영업이익률 (%)", data: financials.map((r) => r.operating_margin), borderColor: "#2563eb", borderWidth: 2 },
+                            { label: "ROE (%)", data: financials.map((r) => r.roe), borderColor: "#10b981", borderWidth: 2 },
+                            { label: "부채비율 (%)", data: financials.map((r) => r.debt_ratio), borderColor: "#ef4444", borderDash: [4, 4], borderWidth: 2 },
+                        ],
+                    },
+                    options: { responsive: true, maintainAspectRatio: false },
+                });
+            } else {
+                t1Chart2TitleEl.textContent = `현재가 vs 증권가 목표주가 (${currency})`;
+                t1Chart2 = new Chart(document.getElementById("t1-chart-2"), {
+                    type: "bar",
+                    data: {
+                        labels: ["52주 최저", "현재가", "목표주가(컨센서스)", "52주 최고"],
+                        datasets: [{
+                            label: `가격 (${currency})`,
+                            data: [snap.low_52w, snap.current_price, snap.target_price, snap.high_52w],
+                            backgroundColor: ["#94a3b8", "#2563eb", "#10b981", "#ef4444"],
+                        }],
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+                });
+            }
+        } else if (isEtf && (etf.return_1m !== null || etf.return_3m !== null || etf.return_1y !== null)) {
+            showEl(t1ChartsRowEl);
+            const retVals = [etf.return_1m, etf.return_3m, etf.return_6m, etf.return_1y];
+            t1Chart1TitleEl.textContent = "ETF 기간별 수익률 비교 (%)";
+            t1Chart1 = new Chart(document.getElementById("t1-chart-1"), {
+                type: "bar",
+                data: {
+                    labels: ["1개월", "3개월", "6개월", "1년"],
+                    datasets: [{
+                        label: "수익률 (%)",
+                        data: retVals,
+                        backgroundColor: retVals.map((v) => (v >= 0 ? "rgba(220, 38, 38, 0.7)" : "rgba(37, 99, 235, 0.7)")),
+                    }],
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+            });
+
+            t1Chart2TitleEl.textContent = `현재가 · NAV · 52주 범위 비교 (${currency})`;
+            t1Chart2 = new Chart(document.getElementById("t1-chart-2"), {
+                type: "bar",
+                data: {
+                    labels: ["52주 최저", "NAV", "현재가", "52주 최고"],
+                    datasets: [{
+                        label: `가격 (${currency})`,
+                        data: [snap.low_52w, etf.nav, snap.current_price, snap.high_52w],
+                        backgroundColor: ["#94a3b8", "#10b981", "#2563eb", "#ef4444"],
+                    }],
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+            });
+        } else {
+            hideEl(t1ChartsRowEl);
+        }
     }
 
     function renderTab1StockDashboard(data) {
@@ -230,6 +357,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 t1FinanceUnitNoteEl.textContent = `단위: ${data.finance_unit || "억원"} / %`;
             }
         }
+
+        renderTab1Visuals(data);
 
         t1FinancialsTbodyEl.innerHTML = "";
         const financials = data.financials || [];

@@ -736,3 +736,44 @@ body {
     border-top: 1px solid #e2e8f0;
     line-height: 1.5;
 }
+.range-gauge {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.range-gauge-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: #334155;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.range-track {
+    position: relative;
+    height: 10px;
+    background: linear-gradient(90deg, #dbeafe 0%, #fef3c7 50%, #fee2e2 100%);
+    border-radius: 999px;
+}
+
+.range-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #2563eb;
+    border: 3px solid #ffffff;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+}
+
+.range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    color: #64748b;
+    margin-top: 6px;
+}
