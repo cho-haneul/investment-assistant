@@ -259,6 +259,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let t1CachedStockData = null;
     let t1Chart1 = null;
     let t1Chart2 = null;
+    let t1PriceHistoryChart = null;
+    let t1CurrentRange = "3m";
 
     const t1FetchForm = document.getElementById("t1-fetch-form");
     const t1FetchBtn = document.getElementById("t1-fetch-btn");
@@ -280,6 +282,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const t1PriceChangeEl = document.getElementById("t1-price-change");
     const t1SnapshotGridEl = document.getElementById("t1-snapshot-grid");
     const t1GaugeEl = document.getElementById("t1-52w-gauge");
+    const t1PriceCardEl = document.getElementById("t1-price-card");
+    const t1PriceRangeChangeEl = document.getElementById("t1-price-range-change");
     const t1ChartsRowEl = document.getElementById("t1-charts-row");
     const t1Chart1TitleEl = document.getElementById("t1-chart-1-title");
     const t1Chart2TitleEl = document.getElementById("t1-chart-2-title");
@@ -641,6 +645,92 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function loadTab1PriceChart(code, rangeKey = "3m") {
+        if (!t1PriceCardEl || !code) return;
+        try {
+            const resp = await fetch("/api/price_history", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code, range: rangeKey }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.series || data.series.length === 0) {
+                hideEl(t1PriceCardEl);
+                return;
+            }
+            showEl(t1PriceCardEl);
+
+            const pct = data.change_pct;
+            const isUp = pct === null || pct >= 0;
+            const lineColor = isUp ? "#dc2626" : "#2563eb";
+            const fillTop = isUp ? "rgba(220, 38, 38, 0.22)" : "rgba(37, 99, 235, 0.22)";
+            const fillBottom = isUp ? "rgba(220, 38, 38, 0.0)" : "rgba(37, 99, 235, 0.0)";
+
+            if (t1PriceRangeChangeEl) {
+                t1PriceRangeChangeEl.className = `price-change ${isUp ? "up" : "down"}`;
+                t1PriceRangeChangeEl.textContent = pct !== null
+                    ? `${pct >= 0 ? "+" : ""}${pct}% (${rangeKey.toUpperCase()})`
+                    : "-";
+            }
+
+            const canvas = document.getElementById("t1-price-history-chart");
+            const ctx = canvas.getContext("2d");
+            const grad = ctx.createLinearGradient(0, 0, 0, 320);
+            grad.addColorStop(0, fillTop);
+            grad.addColorStop(1, fillBottom);
+
+            if (t1PriceHistoryChart) t1PriceHistoryChart.destroy();
+            t1PriceHistoryChart = new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: data.series.map((p) => p.date),
+                    datasets: [{
+                        label: `종가 (${data.currency})`,
+                        data: data.series.map((p) => p.close),
+                        borderColor: lineColor,
+                        backgroundColor: grad,
+                        fill: true,
+                        borderWidth: 2.4,
+                        tension: 0.15,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        pointHoverBackgroundColor: lineColor,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: "index", intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (c) => ` 종가: ${formatPrice(c.parsed.y, data.currency)}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { maxTicksLimit: 7 } },
+                        y: { grid: { color: "rgba(148, 163, 184, 0.18)" } },
+                    },
+                },
+            });
+        } catch (err) {
+            hideEl(t1PriceCardEl);
+        }
+    }
+
+    document.querySelectorAll(".range-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".range-btn").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            t1CurrentRange = btn.dataset.range || "3m";
+            if (t1CachedStockData && t1CachedStockData.code) {
+                loadTab1PriceChart(t1CachedStockData.code, t1CurrentRange);
+            }
+        });
+    });
+
     async function runTab1FetchAndAnalyze(rawCode) {
         const code = String(rawCode || "").trim().toUpperCase();
         if (!isValidSymbol(code)) {
@@ -672,6 +762,7 @@ document.addEventListener("DOMContentLoaded", () => {
             t1ConversationId = null;
             renderTab1StockDashboard(stockData);
             showEl(t1StockView);
+            loadTab1PriceChart(stockData.code, t1CurrentRange);
 
             t1EvidenceJson.textContent = JSON.stringify(stockData, null, 2);
             showEl(t1EvidenceWrap);

@@ -901,3 +901,32 @@ body {
     .stock-header { flex-direction: column; }
     .price-box { text-align: left; }
 }
+.range-btn-group {
+    display: inline-flex;
+    gap: 4px;
+    background: #f1f5f9;
+    padding: 4px;
+    border-radius: 10px;
+}
+
+.range-btn {
+    padding: 5px 12px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #475569;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.range-btn:hover {
+    color: #0f172a;
+}
+
+.range-btn.active {
+    background: #ffffff;
+    color: #0f172a;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}

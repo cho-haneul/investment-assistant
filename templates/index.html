@@ -114,6 +114,26 @@
                     <div id="t1-52w-gauge" class="range-gauge hidden"></div>
                 </div>
 
+                <!-- 토스증권 스타일 주가 변동 그래프 -->
+                <div id="t1-price-card" class="card hidden">
+                    <div class="section-title-row">
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                            <h3>주가 변동 그래프</h3>
+                            <span id="t1-price-range-change" class="price-change">-</span>
+                        </div>
+                        <div class="range-btn-group">
+                            <button type="button" class="range-btn" data-range="1w">1주</button>
+                            <button type="button" class="range-btn" data-range="1m">1개월</button>
+                            <button type="button" class="range-btn active" data-range="3m">3개월</button>
+                            <button type="button" class="range-btn" data-range="6m">6개월</button>
+                            <button type="button" class="range-btn" data-range="1y">1년</button>
+                        </div>
+                    </div>
+                    <div class="chart-box-tall">
+                        <canvas id="t1-price-history-chart"></canvas>
+                    </div>
+                </div>
+
                 <div id="t1-charts-row" class="chart-two-col hidden">
                     <div class="card">
                         <h3 id="t1-chart-1-title">연간 매출 · 영업이익 · 순이익 추이</h3>

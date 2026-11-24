@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from collector import collect_stock_data, search_stocks
 from dart_client import collect_dart_data
 from dify_client import ask_analysis_bot, ask_tech_bot
-from quant import calculate_rebalancing, calculate_technical_indicators
+from quant import calculate_rebalancing, calculate_technical_indicators, get_price_history
 
 # .env 환경변수 로드
 load_dotenv()
@@ -316,6 +316,18 @@ def api_rebalance():
     if err:
         return jsonify({"error": err}), 400
 
+    return jsonify(result), 200
+
+
+@app.route("/api/price_history", methods=["POST"])
+def api_price_history():
+    """탭 1: 토스증권 스타일 주가 변동 에어리어 차트용 기간별 종가 시계열 반환"""
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("code") or "").strip().upper()
+    range_key = str(body.get("range") or "3m").lower()
+    result, err = get_price_history(code, range_key=range_key)
+    if err:
+        return jsonify({"error": err}), 400
     return jsonify(result), 200
 
 

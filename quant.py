@@ -482,3 +482,62 @@ def calculate_technical_indicators(code, days=365, chart_points=120):
         "latest": latest,
         "series": series,
     }, None
+
+
+def get_price_history(code, range_key="3m"):
+    """
+    탭 1 토스증권 스타일 주가 변동 차트용 기간별 종가·거래량 시계열을 반환합니다.
+    range_key: '1w' (1주), '1m' (1개월), '3m' (3개월), '6m' (6개월), '1y' (1년)
+    """
+    ok, code_str = validate_code(code)
+    if not ok:
+        return None, code_str
+
+    days_map = {"1w": 10, "1m": 32, "3m": 92, "6m": 185, "1y": 366}
+    r_key = str(range_key or "3m").lower()
+    if r_key not in days_map:
+        r_key = "3m"
+
+    end_date = dt.date.today()
+    start_date = end_date - dt.timedelta(days=days_map[r_key])
+    start_str = start_date.strftime("%Y-%m-%d")
+    end_str = end_date.strftime("%Y-%m-%d")
+
+    try:
+        df = fdr.DataReader(code_str, start_str, end_str)
+    except Exception as e:
+        return None, f"주가 이력 조회 실패: {str(e)}"
+
+    if df is None or df.empty or "Close" not in df.columns:
+        return None, f"종목 '{code_str}'의 해당 기간 주가 데이터가 없습니다."
+
+    df = df.dropna(subset=["Close"])
+    if r_key == "1w" and len(df) > 6:
+        df = df.tail(6)
+
+    is_us = is_us_ticker(code_str)
+    digits = 2 if is_us else 0
+
+    series = []
+    for idx, row in df.iterrows():
+        date_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
+        series.append({
+            "date": date_str,
+            "close": _safe_round(row["Close"], digits),
+            "volume": int(row["Volume"]) if "Volume" in row and not pd.isna(row["Volume"]) else 0,
+        })
+
+    change_pct = None
+    if len(series) >= 2 and series[0]["close"] and series[-1]["close"] is not None:
+        first_p = float(series[0]["close"])
+        last_p = float(series[-1]["close"])
+        if first_p > 0:
+            change_pct = round(((last_p - first_p) / first_p) * 100.0, 2)
+
+    return {
+        "code": code_str,
+        "currency": "USD" if is_us else "KRW",
+        "range": r_key,
+        "change_pct": change_pct,
+        "series": series,
+    }, None
