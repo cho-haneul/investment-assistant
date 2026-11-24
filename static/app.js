@@ -693,6 +693,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         }
                         t1AllocAmount.textContent = `${d.amount_manwon}만원`;
                         t1AllocBar.style.width = `${d.amount_manwon}%`;
+                        const hue = Math.round((d.amount_manwon / 100) * 140); // 0=빨강 -> 50=노랑/연두 -> 100=초록
+                        const barColor = `hsl(${hue}, 74%, 42%)`;
+                        t1AllocBar.style.backgroundColor = barColor;
+                        t1AllocAmount.style.color = `hsl(${hue}, 78%, 34%)`;
                         t1AllocReason.textContent = d.reason || "";
                     })
                     .catch((err) => {
