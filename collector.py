@@ -1,6 +1,10 @@
+import datetime as dt
+import json
 import logging
 import os
 import re
+import tempfile
+from collections import Counter
 import requests
 from dotenv import load_dotenv
 
@@ -108,11 +112,122 @@ def fetch_basic(code):
     return {"name": name, "asset_type": asset_type, "snapshot": basic_snapshot}, None
 
 
+_DELISTED_KR_CACHE = None
+_DELISTED_CACHE_PATH = os.path.join(tempfile.gettempdir(), "krx_delisting_cache.json")
+
+
+def _get_delisted_kr_map():
+    """FinanceDataReader KRX-DELISTING 목록을 조회해 {종목코드: 정보} 딕셔너리로 캐시합니다."""
+    global _DELISTED_KR_CACHE
+    if _DELISTED_KR_CACHE is not None:
+        return _DELISTED_KR_CACHE
+
+    if os.path.exists(_DELISTED_CACHE_PATH):
+        try:
+            mtime = dt.datetime.fromtimestamp(os.path.getmtime(_DELISTED_CACHE_PATH))
+            if (dt.datetime.now() - mtime).total_seconds() < 86400:
+                with open(_DELISTED_CACHE_PATH, "r", encoding="utf-8") as f:
+                    _DELISTED_KR_CACHE = json.load(f)
+                return _DELISTED_KR_CACHE
+        except Exception:
+            pass
+
+    try:
+        import FinanceDataReader as fdr
+        df = fdr.StockListing("KRX-DELISTING")
+        mapping = {}
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                sym = str(row.get("Symbol") or "").strip()
+                nm = str(row.get("Name") or "").strip()
+                if not sym or not nm or len(sym) != 6 or not sym.isdigit():
+                    continue
+                del_dt = row.get("DelistingDate")
+                del_str = str(del_dt)[:10] if del_dt is not None and str(del_dt) != "NaT" else ""
+                mapping[sym] = {
+                    "code": sym,
+                    "name": nm,
+                    "market": str(row.get("Market") or "KRX").strip(),
+                    "delisting_date": del_str,
+                    "reason": str(row.get("Reason") or "").strip(),
+                }
+        _DELISTED_KR_CACHE = mapping
+        try:
+            with open(_DELISTED_CACHE_PATH, "w", encoding="utf-8") as f:
+                json.dump(mapping, f, ensure_ascii=False)
+        except Exception:
+            pass
+        return mapping
+    except Exception as e:
+        logger.warning(f"[DELISTED] KRX-DELISTING 조회 실패: {e}")
+        _DELISTED_KR_CACHE = {}
+        return _DELISTED_KR_CACHE
+
+
+def _search_via_serper(query):
+    """네이버 자동완성에 없는 해외/특수 종목명(예: 이노홀딩스 -> INHD)을 Serper 웹검색으로 역추적합니다."""
+    api_key = os.getenv("SERPER_API_KEY")
+    if not api_key or api_key == "your_serper_api_key_here":
+        return []
+
+    try:
+        resp = requests.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+            json={"q": f"{query} 주가 종목코드 티커", "gl": "kr", "hl": "ko", "num": 5},
+            timeout=4,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return []
+
+    stop_words = {"USD", "KRW", "ETF", "SEC", "IPO", "CEO", "USA", "KOR", "AI", "MY", "IT", "PC", "TV", "PER", "PBR", "EPS", "BPS", "ROE", "ROA", "NYSE", "AMEX", "KOSPI"}
+    ticker_counts = Counter()
+    kr6_counts = Counter()
+    for item in (data.get("organic") or []):
+        txt = f"{item.get('title', '')} {item.get('snippet', '')}"
+        for t in re.findall(r"(?:[(:\s]|^|\b)([A-Z]{2,5})(?:[)\s.,]|$|\b)", txt):
+            if t not in stop_words:
+                ticker_counts[t] += 1
+        for k in re.findall(r"\b(\d{6})\b", txt):
+            kr6_counts[k] += 1
+
+    candidates = []
+    for t, _ in ticker_counts.most_common(3):
+        us_data, err = fetch_us_basic(t)
+        if not err and us_data:
+            candidates.append({
+                "code": t,
+                "name": us_data["name"],
+                "nation": "USA",
+                "market": us_data["snapshot"].get("market") or "US",
+            })
+            break
+
+    if not candidates:
+        for k, _ in kr6_counts.most_common(2):
+            kr_data, err = fetch_basic(k)
+            if not err and kr_data:
+                candidates.append({
+                    "code": k,
+                    "name": kr_data["name"],
+                    "nation": "KOR",
+                    "market": kr_data["snapshot"].get("market") or "KRX",
+                })
+                break
+
+    return candidates
+
+
 def search_stocks(query, limit=8):
-    """네이버 증권 자동완성 API로 국내 주식·ETF 및 미국 주식·ETF를 이름/티커로 검색합니다."""
+    """네이버 증권 자동완성 + KRX 상장폐지 목록 + Serper 웹검색 폴백으로 국내/미국/상장폐지 종목을 검색합니다."""
     q = str(query or "").strip()
     if not q:
         return [], None
+
+    results = []
+    seen = set()
 
     url = "https://ac.stock.naver.com/ac"
     params = {"q": q, "target": "stock,etf,worldstock"}
@@ -120,29 +235,52 @@ def search_stocks(query, limit=8):
         resp = requests.get(url, params=params, headers=HEADERS, timeout=4)
         resp.raise_for_status()
         data = resp.json()
+        for item in (data.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code") or "").strip().upper()
+            name = str(item.get("name") or "").strip()
+            if not code or not name or code in seen:
+                continue
+            if not (len(code) == 6 and code.isdigit()) and not is_us_ticker(code):
+                continue
+            seen.add(code)
+            results.append({
+                "code": code,
+                "name": name,
+                "nation": item.get("nationCode") or "KOR",
+                "market": item.get("typeName") or item.get("typeCode") or "",
+            })
+            if len(results) >= limit:
+                break
     except (requests.exceptions.RequestException, ValueError) as e:
-        return [], f"종목 검색 실패: {str(e)}"
+        logger.warning(f"[SEARCH] 네이버 자동완성 실패: {e}")
 
-    results = []
-    seen = set()
-    for item in (data.get("items") or []):
-        if not isinstance(item, dict):
-            continue
-        code = str(item.get("code") or "").strip().upper()
-        name = str(item.get("name") or "").strip()
-        if not code or not name or code in seen:
-            continue
-        if not (len(code) == 6 and code.isdigit()) and not is_us_ticker(code):
-            continue
-        seen.add(code)
-        results.append({
-            "code": code,
-            "name": name,
-            "nation": item.get("nationCode") or "KOR",
-            "market": item.get("typeName") or item.get("typeCode") or "",
-        })
-        if len(results) >= limit:
-            break
+    # 2차: 국내 상장폐지/거래정지 이력 종목 검색 (KRX-DELISTING)
+    if len(results) < limit:
+        q_norm = q.replace(" ", "").lower()
+        delisted_map = _get_delisted_kr_map()
+        for sym, info in delisted_map.items():
+            if sym in seen:
+                continue
+            nm_norm = info["name"].replace(" ", "").lower()
+            if q_norm in nm_norm or q == sym:
+                seen.add(sym)
+                results.append({
+                    "code": sym,
+                    "name": info["name"],
+                    "nation": "KOR",
+                    "market": f"{info['market']} (상장폐지 {info['delisting_date']})",
+                })
+                if len(results) >= limit:
+                    break
+
+    # 3차: 여전히 검색 결과가 없으면 Serper 웹검색으로 티커/코드 역추적 (예: 이노홀딩스 -> INHD)
+    if not results:
+        for cand in _search_via_serper(q):
+            if cand["code"] not in seen:
+                seen.add(cand["code"])
+                results.append(cand)
 
     return results, None
 
@@ -626,6 +764,31 @@ def collect_stock_data(code):
     # 2. 국내 주식/ETF Basic API 수집
     basic_data, err = fetch_basic(validated_code)
     if err:
+        # 상장폐지된 국내 종목인지 확인해 과거 정보 + 뉴스라도 제공
+        delisted_info = _get_delisted_kr_map().get(validated_code)
+        if delisted_info:
+            result["name"] = delisted_info["name"]
+            result["asset_type"] = "stock"
+            last_px = None
+            try:
+                import FinanceDataReader as fdr
+                df_hist = fdr.DataReader(validated_code)
+                if df_hist is not None and not df_hist.empty and "Close" in df_hist.columns:
+                    last_px = int(float(df_hist["Close"].dropna().iloc[-1]))
+            except Exception:
+                pass
+            result["snapshot"] = {
+                "current_price": last_px,
+                "change_price": 0,
+                "change_rate": 0.0,
+                "market": delisted_info["market"],
+                "market_status": f"상장폐지 ({delisted_info['delisting_date']})",
+                "delisting_reason": delisted_info.get("reason") or "상장폐지",
+            }
+            news_data, _ = fetch_news(delisted_info["name"], num=5)
+            result["news"] = news_data or []
+            return result
+
         result["errors"].append(err)
         logger.error(f"[ERROR] {err}")
         return result
