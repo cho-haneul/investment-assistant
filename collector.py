@@ -147,6 +147,39 @@ def search_stocks(query, limit=8):
     return results, None
 
 
+def resolve_stock_input(raw_input):
+    """
+    사용자가 입력한 종목코드(국내 6자리, 미국 티커) 또는 종목명(예: 대성하이텍, 바이오인프라, apple)을
+    실제 조회 가능한 종목코드로 변환합니다.
+    """
+    q = str(raw_input or "").strip()
+    if not q:
+        return None, "종목명 또는 종목코드를 입력해 주세요."
+
+    q_upper = q.upper()
+    if len(q_upper) == 6 and q_upper.isdigit():
+        return q_upper, None
+
+    # 영문 소문자 포함 단어(예: apple, tesla)는 티커가 아닌 기업명 검색 우선
+    if is_us_ticker(q_upper) and q == q_upper:
+        us_basic, err = fetch_us_basic(q_upper)
+        if not err and us_basic:
+            return q_upper, None
+
+    items, err = search_stocks(q, limit=8)
+    if items:
+        q_norm = q.replace(" ", "").lower()
+        for it in items:
+            if (it.get("name") or "").replace(" ", "").lower() == q_norm:
+                return it["code"], None
+        return items[0]["code"], None
+
+    if is_us_ticker(q_upper):
+        return q_upper, None
+
+    return None, f"'{q}'에 해당하는 국내/미국 종목을 찾지 못했습니다."
+
+
 def fetch_stock_name(code):
     """종목코드(국내 6자리 또는 미국 티커)로 공식 종목명(또는 ETF명)만 빠르게 조회합니다."""
     is_valid, validated_code = validate_code(code)
@@ -521,13 +554,15 @@ def collect_stock_data(code):
         "errors": []
     }
 
-    # 1. 종목코드 검증
-    is_valid, validated_code = validate_code(code)
-    if not is_valid:
-        result["errors"].append(validated_code)
-        logger.error(f"[ERROR] 종목코드 유효성 검증 실패: {validated_code}")
+    # 1. 종목코드/종목명 자동 해석 및 검증
+    resolved_code, err = resolve_stock_input(code)
+    if err or not resolved_code:
+        msg = err or f"종목을 찾지 못했습니다: '{code}'"
+        result["errors"].append(msg)
+        logger.error(f"[ERROR] 종목 해석 실패: {msg}")
         return result
 
+    validated_code = resolved_code
     result["code"] = validated_code
 
     # 미국 주식/ETF 분기

@@ -60,12 +60,17 @@ document.addEventListener("DOMContentLoaded", () => {
     async function resolveCodeOrSearch(rawInput) {
         const val = String(rawInput || "").trim();
         if (!val) return "";
-        if (isValidSymbol(val)) return val.toUpperCase();
+        if (/^\d{6}$/.test(val)) return val;
+        // 대문자 티커(예: AAPL, SPY)는 그대로 사용하고, 한글 종목명이나 소문자 영문(apple 등)은 검색 API로 우선 해석
+        if (/^[A-Z]{1,5}([.-][A-Z]{1,2})?$/.test(val)) return val;
         try {
             const resp = await fetch(`/api/search?q=${encodeURIComponent(val)}`);
             const data = await resp.json();
-            if (data.items && data.items.length > 0) {
-                return data.items[0].code;
+            const items = data.items || [];
+            if (items.length > 0) {
+                const norm = val.replace(/\s+/g, "").toLowerCase();
+                const exact = items.find((it) => (it.name || "").replace(/\s+/g, "").toLowerCase() === norm);
+                return (exact || items[0]).code;
             }
         } catch (err) {
             console.warn("[SEARCH] 자동 코드 변환 실패:", err);
@@ -80,7 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
         inputEl.addEventListener("input", () => {
             const q = inputEl.value.trim();
             clearTimeout(timer);
-            if (!q || isValidSymbol(q)) {
+            if (!q || /^\d{6}$/.test(q)) {
                 hideEl(listEl);
                 return;
             }
